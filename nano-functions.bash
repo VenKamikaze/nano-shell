@@ -1,20 +1,35 @@
 #!/bin/bash
 #
+# Description: Wraps the RPC of a nano node to allow ease of use from BASH shell command line
+#
+# WARNING: There are a number of functions in here that can wipe your wallet, so please be cautious when using this.
+# There are also functions that can take a seed or private key as plain text.
+# Do not use these functions on a shared server as your seed/private key may be visible to others.
+#
+# Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
+#
+NANO_FUNCTIONS_VERSION=0.9
 
-HOST="127.0.0.1:55000"
+# Version: 0.9
+#          - Initial release and upload to github.
+
+NODEHOST="127.0.0.1:55000"
 DEBUG=${DEBUG:-0}
 
+NANO_FUNCTIONS_LOCATION=$(readlink -f ${BASH_SOURCE[0]})
+
 check_dependencies() {
-  which bc
+  which bc > /dev/null
   [[ $? -eq 1 ]] && echo "bc not found." >&2 && return 1
-  which curl
+  which curl > /dev/null
   [[ $? -eq 1 ]] && echo "cURL not found." >&2 && return 2
-  which cut
+  which cut > /dev/null
   [[ $? -eq 1 ]] && echo "cut not found." >&2 && return 3
-  which grep
+  which grep > /dev/null
   [[ $? -eq 1 ]] && echo "grep not found." >&2 && return 4
-  which mktemp
+  which mktemp > /dev/null
   [[ $? -eq 1 ]] && echo "mktemp not found." >&2 && return 5
+  return 0
 }
 
 unregex() {
@@ -29,80 +44,100 @@ debug() {
   fi
 }
 
+update() {
+  local TESTING=${1:-}
+  local BRANCH="master"
+  [[ "${TESTING}" == "testing" ]] && BRANCH="develop"
+  local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
+  if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
+    curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
+    if [[ $? -eq 0 ]]; then
+      echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
+      mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
+      #mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
+      #[[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
+    else
+      echo "Unable to download ${SOURCE_URL}. Failed to update." >&2 && return 1
+    fi
+  else
+    echo "${NANO_FUNCTIONS_LOCATION} not writable or was not set. Failed to update." >&2 && return 1
+  fi
+}
+
 #######################################
 # Query commands
 #######################################
 
 block_count() {
-  curl -g -d '{ "action": "block_count" }' "${HOST}"
+  curl -g -d '{ "action": "block_count" }' "${NODEHOST}"
 }
 
 nano_version() {
-  curl -g -d '{ "action": "version" }' "${HOST}"
+  curl -g -d '{ "action": "version" }' "${NODEHOST}"
 }
 
 nano_statistics() {
-  curl -g -d '{ "action": "stats", "type": "counters" }' "${HOST}"
+  curl -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
 }
 
 get_account_info() {
   local ACCOUNT=${1:-}
-  local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${HOST}" )
+  local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" )
   echo $RET
 }
 
 get_frontier_hash_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${HOST}" | grep frontier | cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | grep frontier | cut -d'"' -f4)
   echo $RET
 }
 
 get_balance_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${HOST}" | grep balance | cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | grep balance | cut -d'"' -f4)
   echo $RET
 }
 
 get_account_representative() {
   local ACCOUNT=${1:-}
-  local RET=$(curl -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${HOST}" )
+  local RET=$(curl -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" )
   echo $RET
 }
 
 wallet_contains() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
-  local RET=$(curl -g -d '{ "action": "wallet_contains", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'" }' "${HOST}" | grep exists | cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "wallet_contains", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | grep exists | cut -d'"' -f4)
   echo $RET
 }
 
 wallet_frontiers() {
   local WALLET=${1:-}
-  local RET=$(curl -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${HOST}" )
+  local RET=$(curl -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
   echo $RET
 }
 
 wallet_balances() {
   local WALLET=${1:-}
-  local RET=$(curl -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${HOST}" )
+  local RET=$(curl -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
   echo $RET
 }
 
 pending_exists() {
   local HASH=${1:-}
-  local RET=$(curl -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${HOST}" | grep exists | cut -d'"' -f4 )
+  local RET=$(curl -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}" | grep exists | cut -d'"' -f4 )
   echo $RET
 }
 
 search_pending() {
   local WALLET=${1:-}
-  local RET=$(curl -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${HOST}" | grep started | cut -d'"' -f4 )
+  local RET=$(curl -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${NODEHOST}" | grep started | cut -d'"' -f4 )
   echo $RET
 }
 
 block_info() {
   local HASH=${1:-}
-  local RET=$(curl -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -156,7 +191,7 @@ block_info_amount_mrai() {
   local HASH=${1:-}
   local RAW_AMOUNT=$(block_info_amount "${HASH}")
 
-  local RET=$(curl -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${HOST}" | grep amount | cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | grep amount | cut -d'"' -f4)
   echo $RET
 }
 
@@ -173,14 +208,14 @@ allow_unsafe_commands() {
 
 wallet_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
-  local RET=$(curl -g -d '{ "action": "wallet_create" }' "${HOST}" | grep wallet | cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "wallet_create" }' "${NODEHOST}" | grep wallet | cut -d'"' -f4)
   echo $RET
 }
 
 wallet_export() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
-  curl -g -d '{ "action": "wallet_export", "wallet": "'${WALLET}'" }' "${HOST}"
+  curl -g -d '{ "action": "wallet_export", "wallet": "'${WALLET}'" }' "${NODEHOST}"
 }
 
 #######################################
@@ -192,7 +227,7 @@ accounts_create() {
   local WALLET=${1:-}
   local COUNT=${2:-0}
   local WORKGEN=${3:-false}
-  local RET=$(curl -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${NODEHOST}")
   echo $RET
 
 }
@@ -221,7 +256,7 @@ wallet_change_seed_UNSAFE() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
   local SEED=${2:-}
-  local RET=$(curl -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -230,7 +265,7 @@ wallet_change_seed() {
   local WALLET=${1:-}
   local SEED_FILE=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
-  local RET=$(curl -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'$(cat "${SEED_FILE}")'" }' "${HOST}" | grep success | cut -d'"' -f2)
+  local RET=$(curl -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'$(cat "${SEED_FILE}")'" }' "${NODEHOST}" | grep success | cut -d'"' -f2)
   echo $RET
 }
 
@@ -241,7 +276,7 @@ query_deterministic_keys_UNSAFE() {
   local SEED=${1:-}
   local INDEX=${2:-}
   echo SEED $SEED
-  local RET=$(curl -g -d '{ "action": "deterministic_key", "seed": "'${SEED}'", "index": "'${INDEX}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "deterministic_key", "seed": "'${SEED}'", "index": "'${INDEX}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -250,7 +285,7 @@ query_deterministic_keys() {
   local SEED_FILE=${1:-}
   local INDEX=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
-  local RET=$(curl -g -d '{ "action": "deterministic_key", "seed": "'$(cat "${SEED_FILE}")'", "index": "'${INDEX}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "deterministic_key", "seed": "'$(cat "${SEED_FILE}")'", "index": "'${INDEX}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -261,7 +296,7 @@ query_deterministic_keys() {
 generate_work() {
   local FRONTIER=${1:-}
   [[ -z "${FRONTIER}" ]] && echo Need a frontier && return 1
-  local RET=$(curl -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" }' "${HOST}" | grep work| cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" }' "${NODEHOST}" | grep work| cut -d'"' -f4)
   echo $RET
 }
 
@@ -270,7 +305,7 @@ broadcast_block() {
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
   PAYLOAD_JSON=$(/usr/bin/mktemp --tmpdir payload.XXXXX)
   echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
-  local RET=$(curl -g -d @${PAYLOAD_JSON} "${HOST}")
+  local RET=$(curl -g -d @${PAYLOAD_JSON} "${NODEHOST}")
   DEBUG_BROADCAST=$RET
   local HASH=$(echo "${RET}" | grep hash | cut -d'"' -f4)
   echo $HASH
@@ -280,7 +315,7 @@ receive() {
   local WALLET=${1:-} 
   local ACCOUNT=${2:-} 
   local BLOCK=${3:-} 
-  local RET=$(curl -g -d '{ "action": "receive", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "block": "'${BLOCK}'" }' "${HOST}" | grep block| cut -d'"' -f4)
+  local RET=$(curl -g -d '{ "action": "receive", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "block": "'${BLOCK}'" }' "${NODEHOST}" | grep block| cut -d'"' -f4)
   echo $RET
 }
 
@@ -307,7 +342,7 @@ open_block_old() {
   local REPRESENTATIVE=${4:-}
 
   echo About to open account $ACCOUNT by receiving block $BLOCK_TO_RECEIVE
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "open", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${BLOCK_TO_RECEIVE}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "open", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${BLOCK_TO_RECEIVE}'" }' "${NODEHOST}")
   echo UNPUBLISHED BLOCK FULL RESPONSE:
   echo ------------------
   echo $RET
@@ -338,7 +373,7 @@ open_block() {
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE"
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -384,7 +419,7 @@ open_block_2() {
   debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
 
   echo About to open account $ACCOUNT with state block by receiving block $SOURCE
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
   echo UNPUBLISHED BLOCK FULL RESPONSE:
   echo ------------------
   echo $RET
@@ -422,7 +457,7 @@ send_nano() {
   local WORK=$(generate_work ${PREVIOUS})
 
   echo About to send $AMOUNT from $ACCOUNT_FROM to $ACCOUNT_TO
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "send", "key": "'${KEY}'", "account": "'${ACCOUNT_FROM}'", "destination": "'${ACCOUNT_TO}'", "balance": "'${BALANCE}'", "amount": "'${AMOUNT}'", "previous": "'${PREVIOUS}'", "work": "'${WORK}'" }' "${HOST}")
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "send", "key": "'${KEY}'", "account": "'${ACCOUNT_FROM}'", "destination": "'${ACCOUNT_TO}'", "balance": "'${BALANCE}'", "amount": "'${AMOUNT}'", "previous": "'${PREVIOUS}'", "work": "'${WORK}'" }' "${NODEHOST}")
   echo UNPUBLISHED BLOCK FULL RESPONSE:
   echo ------------------
   echo $RET
@@ -434,7 +469,9 @@ send_nano() {
 }
 
 stop_node() {
-  local RET=$(/usr/bin/curl -g -d '{ "action": "stop" }' "${HOST}" | /usr/bin/grep success | /usr/bin/cut -d'"' -f2)
+  local RET=$(/usr/bin/curl -g -d '{ "action": "stop" }' "${NODEHOST}" | /usr/bin/grep success | /usr/bin/cut -d'"' -f2)
   echo $RET
 }
 
+check_dependencies
+[[ $? -ne 0 ]] && echo "${BASH_SOURCE[0]} had dependency errors - this script may not function." || echo "${BASH_SOURCE[0]} sourced."
