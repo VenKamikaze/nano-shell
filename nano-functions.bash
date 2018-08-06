@@ -8,10 +8,18 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.9
+NANO_FUNCTIONS_VERSION=0.91
 
+# Version: 0.91
+#          - Bugfix
+#                   - Rename and enable update_nano_functions
+
+#
+# Last Changed By: M. Saunders
+# -------------------------------
 # Version: 0.9
 #          - Initial release and upload to github.
+#
 
 NODEHOST="127.0.0.1:55000"
 DEBUG=${DEBUG:-0}
@@ -44,7 +52,7 @@ debug() {
   fi
 }
 
-update() {
+update_nano_functions() {
   local TESTING=${1:-}
   local BRANCH="master"
   [[ "${TESTING}" == "testing" ]] && BRANCH="develop"
@@ -54,8 +62,8 @@ update() {
     if [[ $? -eq 0 ]]; then
       echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
       mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
-      #mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
-      #[[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
+      mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
+      [[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
     else
       echo "Unable to download ${SOURCE_URL}. Failed to update." >&2 && return 1
     fi
