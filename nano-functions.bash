@@ -16,8 +16,10 @@ NANO_FUNCTIONS_VERSION=0.92
 #                   - Rename existing (non-state) 'send_nano' function to '__send_block_DEPRECATED'
 #                   - Convert to MNano internally instead of using RPC
 #          - Feature
-#                   - Add state block version of 'send_block'
 #                   - Allow pulling down the latest in-development version from 'develop-next' branch via update_nano_functions
+#                   - Add remote_block_count function to retrieve block counts from trusted remote nodes
+#                   - Add get_account_public_key function
+#                   - Add state block version of 'send_block'
 #          - Bugfix
 #                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
 #                   - Fix block_info_balance related commands for non-state blocks.
@@ -140,10 +142,25 @@ remote_block_count() {
     return 1
   fi
 
-  debug "Got $GOT_RESULTS when attempting to retrieve remote block counts"
-  debug "(${COUNT1}+${COUNT2}+${COUNT3})/${GOT_RESULTS}"
-  let AVG=$(echo "(${COUNT1}+${COUNT2}+${COUNT3})/${GOT_RESULTS}" | bc)
+  debug "Got $GOT_RESULTS results when attempting to retrieve remote block counts"
+  debug "(${COUNT1:-0}+${COUNT2:-0}+${COUNT3:-0})/${GOT_RESULTS}"
+  let AVG=$(echo "(${COUNT1:-0}+${COUNT2:-0}+${COUNT3:-0})/${GOT_RESULTS}" | bc)
   echo $AVG
+}
+
+is_local_and_remote_block_counts_similar() {
+  local WITHIN_AMOUNT=${1:-15}
+  
+  local REMOTE_COUNT=$(remote_block_count)
+  local LOCAL_COUNT=$(block_count)
+
+  local LOCAL_LOWER=$(echo "${LOCAL_COUNT} - ${WITHIN_AMOUNT}" | bc)
+  local LOCAL_UPPER=$(echo "${LOCAL_COUNT} + ${WITHIN_AMOUNT}" | bc)
+  
+  debug "LL=${LOCAL_LOWER}, LU=${LOCAL_UPPER}"
+
+  local IS_WITHIN=$(echo "${REMOTE_COUNT} >= ${LOCAL_LOWER} && ${REMOTE_COUNT} <= ${LOCAL_UPPER}" | bc)
+  echo $IS_WITHIN
 }
 
 nano_version() {
@@ -175,6 +192,12 @@ get_balance_from_account() {
 get_account_representative() {
   local ACCOUNT=${1:-}
   local RET=$(curl -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" )
+  echo $RET
+}
+
+get_account_public_key() {
+  local ACCOUNT=${1:-}
+  local RET=$(curl -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" )
   echo $RET
 }
 
@@ -568,45 +591,57 @@ __open_block_wallet() {
 
 
 __send_block_privkey() {
-  error "NOT YET IMPLEMENTED" && return 10
+  error "WIP - NOT YET IMPLEMENTED" && return 10
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
   local DESTACCOUNT=${3:-}
   local AMOUNT_RAW=${4:-}
 
+  local LOCAL_CHAIN_UP_TO_DATE=$(is_local_and_remote_block_counts_similar)
+  [[ $LOCAL_CHAIN_UP_TO_DATE -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
+
   local PREVIOUS=$(get_frontier_hash_from_account ${SRCACCOUNT})
-  [[ -z "$PREVIOUS" ]] && echo "VALIDATION FAILED: Account sending funds had no previous block." && return 5
+  [[ -z "$PREVIOUS" ]] && error "VALIDATION FAILED: Account sending funds had no previous block." && return 5
   local CURRENT_BALANCE=$(get_balance_from_account ${SRCACCOUNT})
-  if [[ -z "$CURRENT_BALANCE" ]]; then
-    [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
-    CURRENT_BALANCE=0
-  fi  
+  if [[ -z "$CURRENT_BALANCE" || $(echo "${CURRENT_BALANCE} == 0" | bc) -eq 1 ]]; then
+    error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null or zero, no funds are available to send." && return 4
+  fi
 
-  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+  if [[ $(echo "${AMOUNT_RAW} > ${CURRENT_BALANCE}" | bc) -eq 1 ]]; then
+    error "VALIDATION FAILED: You are attempting to send an amount greater than the balance of $SRCACCOUNT." && return 7
+  fi
 
-  local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | bc)
+  local NEW_BALANCE=$(echo "${CURRENT_BALANCE} - ${AMOUNT_RAW}" | bc)
+  if [[ $(echo "${NEW_BALANCE} > ${CURRENT_BALANCE}" | bc) -eq 1 ]]; then
+    error "VALIDATION FAILED: Post send balance is greater than existing balance. Are you trying to send a negative amount?." && return 8
+  fi
 
-  debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
-  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
+  local DESTACCOUNT_PUBKEY=$(get_account_public_key "${DESTACCOUNT}")
+  [[ ${#DESTACCOUNT_PUBKEY} -ne 64 ]] && error "VALIDATION FAILED: Public key for ${DESTACCOUNT} should be 64 characters. Got ${DESTACCOUNT_PUBKEY}" && return 9
 
-  debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE"
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
+  [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+
+  debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT_PUBKEY}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
+
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT_PUBKEY}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}")
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
+  if [[ "${RET}" != *"\"destination\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain destination account: ${DESTACCOUNT}"
     return 1
   fi  
   if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}" >&2
+    error "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}"
     return 2
   fi  
   if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
+    error "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}"
     return 3
   fi  
 
