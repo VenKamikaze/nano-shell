@@ -53,6 +53,8 @@ check_dependencies() {
   [[ $? -eq 1 ]] && echo "grep not found." >&2 && return 4
   which mktemp > /dev/null
   [[ $? -eq 1 ]] && echo "mktemp not found." >&2 && return 5
+  which md5sum > /dev/null
+  [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
   return 0
 }
 
@@ -64,8 +66,8 @@ unregex() {
 
 debug() {
   if [[ 1 -eq ${DEBUG} && -w "${DEBUGLOG}" ]]; then
-    echo " ? ${FUNCNAME[1]:-#SHELL#}: " >> "${DEBUGLOG}"
-    echo " ?? $@" >> "${DEBUGLOG}"
+    echo -n " ? ${FUNCNAME[1]:-#SHELL#}: " >> "${DEBUGLOG}"
+    echo " $@" >> "${DEBUGLOG}"
   fi
 }
 
@@ -96,12 +98,52 @@ update_nano_functions() {
   fi
 }
 
+get_nano_functions_md5sum() {
+  local NANO_FUNCTIONS_HASH=$(grep -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | md5sum)
+  echo "${NANO_FUNCTIONS_HASH}"
+}
+
 #######################################
 # Query commands
 #######################################
 
 block_count() {
   curl -g -d '{ "action": "block_count" }' "${NODEHOST}"
+}
+
+remote_block_count_nanonodeninja() {
+  local RET=$(curl -m5 -g "https://nanonode.ninja/api/blockcount" | grep count | cut -d'"' -f4)
+  [[ $? -eq 0 ]] && echo $RET || echo 0
+}
+
+remote_block_count_nanomeltingice() {
+  local RET=$(curl -m5 -g "https://nano-api.meltingice.net/block_count" | grep count | cut -d'"' -f4)
+  [[ $? -eq 0 ]] && echo $RET || echo 0
+}
+
+remote_block_count_nanowatch() {
+  local RET=$(curl -m5 -g "https://api.nanowat.ch/blocks/count" | grep count | cut -d'"' -f4)
+  [[ $? -eq 0 ]] && echo $RET || echo 0
+}
+
+remote_block_count() {
+  let GOT_RESULTS=3
+  local COUNT1=$(remote_block_count_nanonodeninja)
+  [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
+  local COUNT2=$(remote_block_count_nanowatch)
+  [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
+  local COUNT3=$(remote_block_count_nanomeltingice)
+  [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
+  
+  if [[ 0 -eq $GOT_RESULTS ]]; then
+    error "Unable to retrieve a remote block count from a reliable source. Is your network connection OK?"
+    return 1
+  fi
+
+  debug "Got $GOT_RESULTS when attempting to retrieve remote block counts"
+  debug "(${COUNT1}+${COUNT2}+${COUNT3})/${GOT_RESULTS}"
+  let AVG=$(echo "(${COUNT1}+${COUNT2}+${COUNT3})/${GOT_RESULTS}" | bc)
+  echo $AVG
 }
 
 nano_version() {
@@ -528,13 +570,13 @@ __open_block_wallet() {
 __send_block_privkey() {
   error "NOT YET IMPLEMENTED" && return 10
   local PRIVKEY=${1:-}
-  local SOURCE=${2:-}
+  local SRCACCOUNT=${2:-}
   local DESTACCOUNT=${3:-}
-  local REPRESENTATIVE=${4:-}
+  local AMOUNT_RAW=${4:-}
 
-  local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
-  [[ -z "$PREVIOUS" ]] && PREVIOUS=${ZEROES}
-  local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
+  local PREVIOUS=$(get_frontier_hash_from_account ${SRCACCOUNT})
+  [[ -z "$PREVIOUS" ]] && echo "VALIDATION FAILED: Account sending funds had no previous block." && return 5
+  local CURRENT_BALANCE=$(get_balance_from_account ${SRCACCOUNT})
   if [[ -z "$CURRENT_BALANCE" ]]; then
     [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
     CURRENT_BALANCE=0
@@ -607,3 +649,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
+NANO_FUNCTIONS_HASH=1304dfb273777d78d57720c6d9cdd588
