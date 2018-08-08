@@ -17,6 +17,7 @@ NANO_FUNCTIONS_VERSION=0.92
 #                   - Convert to MNano internally instead of using RPC
 #          - Feature
 #                   - Add state block version of 'send_block'
+#                   - Allow pulling down the latest in-development version from 'develop-next' branch via update_nano_functions
 #          - Bugfix
 #                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
 #                   - Fix block_info_balance related commands for non-state blocks.
@@ -77,6 +78,7 @@ update_nano_functions() {
   local TESTING=${1:-}
   local BRANCH="master"
   [[ "${TESTING}" == "testing" ]] && BRANCH="develop"
+  [[ "${TESTING}" == "bleeding" ]] && BRANCH="develop-next" && echo "WARNING: DO NOT USE THIS BRANCH UNLESS FOR THE LIVE NANO NETWORK. TESTING ONLY"
   local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
   if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
     curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
