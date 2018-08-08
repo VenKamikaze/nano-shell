@@ -8,23 +8,38 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.91
+NANO_FUNCTIONS_VERSION=0.92
 
-# Version: 0.91
+# Version: 0.92
+#          - Refactor
+#                   - Make an open_block wrapper that passes to correct function based on parameters given
+#                   - Rename existing (non-state) 'send_nano' function to '__send_block_DEPRECATED'
+#                   - Convert to MNano internally instead of using RPC
+#          - Feature
+#                   - Add state block version of 'send_block'
 #          - Bugfix
-#                   - Rename and enable update_nano_functions
+#                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
+#                   - Fix block_info_balance related commands for non-state blocks.
 
 #
 # Last Changed By: M. Saunders
 # -------------------------------
+# Version: 0.91
+#          - Bugfix
+#                   - Rename and enable update_nano_functions
+#
 # Version: 0.9
 #          - Initial release and upload to github.
 #
 
 NODEHOST="127.0.0.1:55000"
 DEBUG=${DEBUG:-0}
+DEBUGLOG="${DEBUGLOG:-$(dirname $(readlink -f ${BASH_SOURCE[0]}))/nano-functions.log}"
 
 NANO_FUNCTIONS_LOCATION=$(readlink -f ${BASH_SOURCE[0]})
+
+ZEROES="0000000000000000000000000000000000000000000000000000000000000000"
+ONE_MNANO="1000000000000000000000000000000"
 
 check_dependencies() {
   which bc > /dev/null
@@ -47,9 +62,15 @@ unregex() {
 }
 
 debug() {
-  if [[ 1 -eq ${DEBUG} ]]; then
-    echo "$@"
+  if [[ 1 -eq ${DEBUG} && -w "${DEBUGLOG}" ]]; then
+    echo " ? ${FUNCNAME[1]:-#SHELL#}: " >> "${DEBUGLOG}"
+    echo " ?? $@" >> "${DEBUGLOG}"
   fi
+}
+
+error() {
+  echo " ! ${FUNCNAME[1]:-#SHELL#}: " >&2
+  echo " !! $@" >&2
 }
 
 update_nano_functions() {
@@ -63,6 +84,7 @@ update_nano_functions() {
       echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
       mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
       mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
+      echo "Script ${NANO_FUNCTIONS_LOCATION} has been replaced with the latest copy. If you have problems, you can find the previous version of the script here: ${NANO_FUNCTIONS_LOCATION}.old"
       [[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
     else
       echo "Unable to download ${SOURCE_URL}. Failed to update." >&2 && return 1
@@ -164,11 +186,15 @@ block_info_account_balance() {
   local IS_STATE=$?
   [[ 0 -eq $IS_STATE ]] && IS_STATE="Y" || IS_STATE="N"
   if [[ "Y" == "$IS_STATE" ]]; then
+    debug "state block"
     local ACCOUNT_BALANCE=$(echo "$FULL_INFO" | grep balance | grep -oP 'balance\\":\s\\"(.*?)\\"' | cut -d'"' -f3 | grep -oP '[0-9]+')
+    debug "ACCOUNT_BALANCE (dec): ${ACCOUNT_BALANCE}"
     echo $ACCOUNT_BALANCE
   else
-    local ACCOUNT_BALANCE=$(echo "$FULL_INFO" | grep balance | grep -oP 'balance\\":\s\\"(.*?)\\"' | cut -d'"' -f3 | grep -oP '[0-9]+')
-    ACCOUNT_BALANCE=$(echo "ibase=16; $BALANCE" | bc)
+    debug "older, non-state block"
+    local ACCOUNT_BALANCE=$(echo "$FULL_INFO" | grep balance | grep -oP 'balance\\":\s\\"(.*?)\\"' | cut -d'"' -f3 | grep -oP '[A-F0-9]+')
+    debug "ACCOUNT_BALANCE (hex): ${ACCOUNT_BALANCE}"
+    ACCOUNT_BALANCE=$(echo "ibase=16; $ACCOUNT_BALANCE" | bc)
     echo $ACCOUNT_BALANCE
   fi
 }
@@ -183,24 +209,25 @@ block_info_amount() {
   local IS_SEND=$(echo "${ACCOUNT_BALANCE_NOW} < ${ACCOUNT_BALANCE_PREV}" | bc)
   local IS_EQUAL=$(echo "${ACCOUNT_BALANCE_NOW} < ${ACCOUNT_BALANCE_PREV}" | bc)
   if [[ $IS_SEND -eq 1 ]]; then
-    # is a send
+    debug "this block is a send"
     local AMOUNT=$(echo "${ACCOUNT_BALANCE_PREV} - ${ACCOUNT_BALANCE_NOW}" | bc)
     echo $AMOUNT
   elif [[ $IS_EQUAL -eq 1 ]]; then
+    debug "this block is neither a send nor a receive"
     echo 0
   else
-    # is a receive
+    debug "this block is a receive"
     local AMOUNT=$(echo "${ACCOUNT_BALANCE_NOW} - ${ACCOUNT_BALANCE_PREV}" | bc)
     echo $AMOUNT
   fi
 }
 
-block_info_amount_mrai() {
+block_info_amount_mnano() {
   local HASH=${1:-}
   local RAW_AMOUNT=$(block_info_amount "${HASH}")
 
-  local RET=$(curl -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | grep amount | cut -d'"' -f4)
-  echo $RET
+  echo $(raw_to_mnano ${RAW_AMOUNT})
+  #local RET=$(curl -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | grep amount | cut -d'"' -f4)
 }
 
 #######################################
@@ -259,7 +286,7 @@ account_create() {
 #         exist in any applications running on here exposed to the internet.
 
 # Do not use this function, instead use wallet_change_seed, which takes a FILE as a parameter where the FILE
-#   contains the SEED text. This command instead takes the SEED text which is REDICULOUSLY UNSAFE.
+#   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
 wallet_change_seed_UNSAFE() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
@@ -277,8 +304,8 @@ wallet_change_seed() {
   echo $RET
 }
 
-# Do not use this function, instead use wallet_change_seed, which takes a FILE as a parameter where the FILE
-#   contains the SEED text. This command instead takes the SEED text which is REDICULOUSLY UNSAFE.
+# Do not use this function, instead use query_deterministic_keys, which takes a FILE as a parameter where the FILE
+#   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
 query_deterministic_keys_UNSAFE() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local SEED=${1:-}
@@ -341,6 +368,15 @@ strip_block() {
   echo "$TEMPV"
 }
 
+# Assumes DECIMAL amount for RAW
+raw_to_mnano() {
+  local RAW_AMOUNT=${1:-}
+
+  local RET=$(echo "scale=2; ${RAW_AMOUNT} / ${ONE_MNANO}" | bc)
+  echo $RET
+}
+
+#######################################
 #Deprecated - use state block type now.
 # Also, this never worked. Seems to want a key instead of wallet.
 open_block_old() {
@@ -361,17 +397,49 @@ open_block_old() {
   broadcast_block "${BLOCK}"
 }
 
+#Wrapper that calls the appropriate internal __open_block methods based on parameters passed in
 open_block() {
+  if [[ $# -eq 4 ]]; then
+    __open_block_privkey $@
+  elif [[ $# -eq 5 ]]; then
+    __open_block_wallet $@
+  else
+    error "Invalid parameters
+    expected: PRIVKEY SOURCE DESTACCOUNT REPRESENTATIVE
+          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT REPRESENTATIVE"
+    return 9
+  fi
+}
+
+#Wrapper that calls the appropriate internal __open_block methods based on parameters passed in
+send_block() {
+  if [[ $# -eq 4 ]]; then
+    __send_block_privkey $@
+  elif [[ $# -eq 5 ]]; then
+    error "NOT YET IMPLEMENTED"
+    return 10
+    #__send_block_wallet $@
+  else
+    error "Invalid parameters
+    expected: PRIVKEY SOURCE DESTACCOUNT BALANCE_IN_MNANO
+          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT BALANCE_IN_MNANO"
+    return 9
+  fi
+}
+
+__open_block_privkey() {
   local PRIVKEY=${1:-}
   local SOURCE=${2:-}
   local DESTACCOUNT=${3:-}
   local REPRESENTATIVE=${4:-}
-  #local REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
-  [[ -z "$PREVIOUS" ]] && PREVIOUS="0000000000000000000000000000000000000000000000000000000000000000"
+  [[ -z "$PREVIOUS" ]] && PREVIOUS=${ZEROES}
   local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
-  [[ -z "$CURRENT_BALANCE" ]] && CURRENT_BALANCE=0
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
+    CURRENT_BALANCE=0
+  fi
 
   local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
 
@@ -389,15 +457,15 @@ open_block() {
   DEBUG_FULL_RESPONSE="$RET"
 
   if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}"
+    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
     return 1
   fi
   if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}"
+    echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}" >&2
     return 2
   fi
   if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}"
+    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
     return 3
   fi
 
@@ -408,7 +476,7 @@ open_block() {
 }
 
 # Expects WALLET and ACCOUNT params (did not work for me)
-open_block_2() {
+__open_block_wallet() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
   local SOURCE=${3:-}
@@ -425,25 +493,26 @@ open_block_2() {
   local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | bc)
 
   debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
-  echo About to open account $ACCOUNT with state block by receiving block $SOURCE
+  debug "About to open account $ACCOUNT with state block by receiving block $SOURCE"
   local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
-  echo UNPUBLISHED BLOCK FULL RESPONSE:
-  echo ------------------
-  echo $RET
-  echo ------------------
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug "$RET"
+  debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
   if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}"
+    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
     return 1
   fi
   if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}"
+    echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}" >&2
     return 2
   fi
   if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
-    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}"
+    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
     return 3
   fi
 
@@ -454,7 +523,57 @@ open_block_2() {
 }
 
 
-send_nano() {
+__send_block_privkey() {
+  error "NOT YET IMPLEMENTED" && return 10
+  local PRIVKEY=${1:-}
+  local SOURCE=${2:-}
+  local DESTACCOUNT=${3:-}
+  local REPRESENTATIVE=${4:-}
+
+  local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
+  [[ -z "$PREVIOUS" ]] && PREVIOUS=${ZEROES}
+  local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
+    CURRENT_BALANCE=0
+  fi  
+
+  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+
+  local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | bc)
+
+  debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
+
+  debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE"
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug "$RET"
+  debug "------------------"
+  DEBUG_FULL_RESPONSE="$RET"
+
+  if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
+    return 1
+  fi  
+  if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}" >&2
+    return 2
+  fi  
+  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
+    return 3
+  fi  
+
+  local TEMPV=$(echo "${RET}" | grep block | grep -oP ':(.*)')
+  local BLOCK=$(strip_block "${TEMPV}")
+  echo "$BLOCK"
+  broadcast_block "${BLOCK}"
+}
+
+# DEPRECATED: This is the NON-STATE version for generating a send block and broadcasting it.
+__send_block_DEPRECATED() {
   local KEY=${1:-}
   local ACCOUNT_FROM=${2:-}
   local ACCOUNT_TO=${3:-}
@@ -483,3 +602,6 @@ stop_node() {
 
 check_dependencies
 [[ $? -ne 0 ]] && echo "${BASH_SOURCE[0]} had dependency errors - this script may not function." || echo "${BASH_SOURCE[0]} sourced."
+
+[[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
+
