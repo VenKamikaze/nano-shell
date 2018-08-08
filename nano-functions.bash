@@ -78,7 +78,7 @@ update_nano_functions() {
   local TESTING=${1:-}
   local BRANCH="master"
   [[ "${TESTING}" == "testing" ]] && BRANCH="develop"
-  [[ "${TESTING}" == "bleeding" ]] && BRANCH="develop-next" && echo "WARNING: DO NOT USE THIS BRANCH UNLESS FOR THE LIVE NANO NETWORK. TESTING ONLY"
+  [[ "${TESTING}" == "bleeding" ]] && BRANCH="develop-next" && echo "WARNING: DO NOT USE THIS BRANCH ON THE LIVE NANO NETWORK. TESTING ONLY"
   local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
   if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
     curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
