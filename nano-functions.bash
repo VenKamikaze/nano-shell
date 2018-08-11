@@ -684,4 +684,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=129a98d8b7be6b70ddab503075500386
+NANO_FUNCTIONS_HASH=4d9a7e431a83fc60eb286188fd87b6fd
