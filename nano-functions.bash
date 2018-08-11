@@ -114,17 +114,17 @@ block_count() {
 }
 
 remote_block_count_nanonodeninja() {
-  local RET=$(curl -m5 -g "https://nanonode.ninja/api/blockcount" | grep count | cut -d'"' -f4)
+  local RET=$(curl -m5 -g "https://nanonode.ninja/api/blockcount" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   [[ $? -eq 0 ]] && echo $RET || echo 0
 }
 
 remote_block_count_nanomeltingice() {
-  local RET=$(curl -m5 -g "https://nano-api.meltingice.net/block_count" | grep count | cut -d'"' -f4)
+  local RET=$(curl -m5 -g "https://nano-api.meltingice.net/block_count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   [[ $? -eq 0 ]] && echo $RET || echo 0
 }
 
 remote_block_count_nanowatch() {
-  local RET=$(curl -m5 -g "https://api.nanowat.ch/blocks/count" | grep count | cut -d'"' -f4)
+  local RET=$(curl -m5 -g "https://api.nanowat.ch/blocks/count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   [[ $? -eq 0 ]] && echo $RET || echo 0
 }
 
@@ -684,4 +684,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=1304dfb273777d78d57720c6d9cdd588
+NANO_FUNCTIONS_HASH=129a98d8b7be6b70ddab503075500386
