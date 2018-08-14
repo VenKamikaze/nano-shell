@@ -13,6 +13,7 @@ NANO_FUNCTIONS_VERSION=0.92
 # Version: 0.92
 #          - Refactor
 #                   - Make an open_block wrapper that passes to correct function based on parameters given
+#                   - Make send_block and receive_block wrappers
 #                   - Rename existing (non-state) 'send_nano' function to '__send_block_DEPRECATED'
 #                   - Convert to MNano internally instead of using RPC
 #          - Feature
@@ -20,6 +21,7 @@ NANO_FUNCTIONS_VERSION=0.92
 #                   - Add remote_block_count function to retrieve block counts from trusted remote nodes
 #                   - Add get_account_public_key function
 #                   - Add state block version of 'send_block'
+#                   - Add state block version of 'receive_block'
 #                   - Add generate_spam functions for stress testing
 #          - Bugfix
 #                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
@@ -416,7 +418,7 @@ query_deterministic_keys() {
 }
 
 #######################################
-# Block generation commands
+# Broadcast & PoW commands
 #######################################
 
 generate_work() {
@@ -433,16 +435,9 @@ broadcast_block() {
   echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
   local RET=$(curl -g -d @${PAYLOAD_JSON} "${NODEHOST}")
   DEBUG_BROADCAST=$RET
+  [[ ${DEBUG} -eq 0 ]] && /bin/rm -f "${PAYLOAD_JSON}"
   local HASH=$(echo "${RET}" | grep hash | cut -d'"' -f4)
   echo $HASH
-}
-
-receive() {
-  local WALLET=${1:-} 
-  local ACCOUNT=${2:-} 
-  local BLOCK=${3:-} 
-  local RET=$(curl -g -d '{ "action": "receive", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "block": "'${BLOCK}'" }' "${NODEHOST}" | grep block| cut -d'"' -f4)
-  echo $RET
 }
 
 #######################################
@@ -468,25 +463,8 @@ raw_to_mnano() {
 }
 
 #######################################
-# DEPRECATED: This is the NON-STATE version for generating an open block and broadcasting it.
-# Also, this never worked. Seems to want a key instead of wallet.
-open_block_DEPRECATED() {
-  local WALLET=${1:-}
-  local ACCOUNT=${2:-}
-  local BLOCK_TO_RECEIVE=${3:-}
-  local REPRESENTATIVE=${4:-}
-
-  echo About to open account $ACCOUNT by receiving block $BLOCK_TO_RECEIVE
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "open", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${BLOCK_TO_RECEIVE}'" }' "${NODEHOST}")
-  echo UNPUBLISHED BLOCK FULL RESPONSE:
-  echo ------------------
-  echo $RET
-  echo ------------------
-  local TEMPV=$(echo "${RET}" | grep block | grep -oP ':(.*)')
-  local BLOCK="${TEMPV:1:-1}"
-  echo "$BLOCK"
-  broadcast_block "${BLOCK}"
-}
+# Wrapper functions
+#######################################
 
 #Wrapper that calls the appropriate internal __open_block methods based on parameters passed in
 open_block() {
@@ -518,6 +496,28 @@ send_block() {
     return 9
   fi
 }
+
+#Wrapper that calls the appropriate internal __create_receive_block.* methods based on parameters passed in
+receive_block() {
+  if [[ $# -eq 3 ]]; then
+    local NEWBLOCK=$(__create_receive_block_privkey $@)
+    broadcast_block "${NEWBLOCK}"
+  elif [[ $# -eq 4 ]]; then
+    error "NOT YET IMPLEMENTED"
+    return 10
+    #__create_receive_block_wallet $@
+  else
+    error "Invalid parameters
+    expected: PRIVKEY SOURCE DESTACCOUNT 
+          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT"
+    return 9
+  fi
+}
+
+
+#######################################
+# Stress-test functions
+#######################################
 
 generate_spam_and_broadcast() {
   [[ $# -ne 3 ]] && error "Invalid parameters
@@ -562,7 +562,8 @@ __generate_spam_send_to_file() {
 
   if [[ $# -eq 3 ]]; then
     
-    __create_send_block_privkey $@ 0
+    # Send one RAW
+    __create_send_block_privkey $@ 1
     if [[ ${#BLOCK_HASH} -eq 64 ]]; then
       debug " ? Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
       echo "${BLOCK}" >> "${BLOCK_STORE}"
@@ -583,7 +584,7 @@ __generate_spam_send_to_file() {
 send_pre-generated_blocks() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
 
-  while read line; do
+  while read -r line; do
     broadcast_block "${line}"
   done < "${BLOCK_STORE}"
 
@@ -720,16 +721,13 @@ __create_send_block_privkey() {
     error "VALIDATION FAILED: Post send balance is greater than existing balance. Are you trying to send a negative amount?." && return 8
   fi  
 
-  local DESTACCOUNT_PUBKEY=$(get_account_public_key "${DESTACCOUNT}")
-  [[ ${#DESTACCOUNT_PUBKEY} -ne 64 ]] && error "VALIDATION FAILED: Public key for ${DESTACCOUNT} should be 64 characters. Got ${DESTACCOUNT_PUBKEY}" && return 9
-
   local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
   [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
 
   debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
-  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT_PUBKEY}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
 
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT_PUBKEY}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}")
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}")
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -741,7 +739,7 @@ __create_send_block_privkey() {
     return 1
   fi
   if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
-    error "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}"
+    error "VALIDATION FAILED: Response did not contain correct new balance after sending funds: ${NEW_BALANCE}"
     return 2
   fi
   if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
@@ -760,27 +758,63 @@ __create_send_block_privkey() {
   echo "$BLOCK"
 }
 
-# DEPRECATED: This is the NON-STATE version for generating a send block and broadcasting it.
-__send_block_DEPRECATED() {
-  local KEY=${1:-}
-  local ACCOUNT_FROM=${2:-}
-  local ACCOUNT_TO=${3:-}
-  local AMOUNT=${4:-}
-  
-  local PREVIOUS=$(get_frontier_hash_from_account ${ACCOUNT_FROM})
-  local BALANCE=$(get_balance_from_account ${ACCOUNT_FROM})
-  local WORK=$(generate_work ${PREVIOUS})
 
-  echo About to send $AMOUNT from $ACCOUNT_FROM to $ACCOUNT_TO
-  local RET=$(curl -g -d '{ "action": "block_create", "type": "send", "key": "'${KEY}'", "account": "'${ACCOUNT_FROM}'", "destination": "'${ACCOUNT_TO}'", "balance": "'${BALANCE}'", "amount": "'${AMOUNT}'", "previous": "'${PREVIOUS}'", "work": "'${WORK}'" }' "${NODEHOST}")
-  echo UNPUBLISHED BLOCK FULL RESPONSE:
-  echo ------------------
-  echo $RET
-  echo ------------------
+__create_receive_block_privkey() {
+  local PRIVKEY=${1:-}
+  local SOURCE=${2:-}
+  local DESTACCOUNT=${3:-}
+  local REPRESENTATIVE=${4:-}
+  local PREVIOUS=${PREVIOUS:-}
+
+  [[ -z "$PREVIOUS" ]] && PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
+  [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account receiving funds had no previous block, or previous block hash is invalid." && return 5
+
+  [[ -z "${REPRESENTATIVE}" ]] && REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
+  [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: Representative account for ${DESTACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+
+  local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
+    CURRENT_BALANCE=0
+  fi
+
+  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+
+  local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | bc)
+
+  debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
+
+  debug "About to generate state receive block for $DESTACCOUNT by receiving block $SOURCE"
+  local RET=$(curl -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug "$RET"
+  debug "------------------"
+  DEBUG_FULL_RESPONSE="$RET"
+
+  if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
+    return 1
+  fi
+  if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination account new balance after pocketing receive block funds: ${NEW_BALANCE}" >&2
+    return 2
+  fi
+  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
+    return 3
+  fi
+
+  BLOCK_HASH=$(echo "${RET}" | grep hash | grep -oP ':(.*)' | cut -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
   local TEMPV=$(echo "${RET}" | grep block | grep -oP ':(.*)')
-  local BLOCK="${TEMPV:1:-1}"
+  BLOCK=$(strip_block "${TEMPV}")
   echo "$BLOCK"
-  broadcast_block "${BLOCK}"
 }
 
 stop_node() {
@@ -793,4 +827,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=b6f7800ae7d579c2ddf9ba19ed67782b
+NANO_FUNCTIONS_HASH=9d25a472e8f452aefa449c9bf1c800d1
