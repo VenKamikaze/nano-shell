@@ -3,8 +3,8 @@
 # Description: Wraps the RPC of a nano node to allow ease of use from BASH shell command line
 #
 # WARNING: There are a number of functions in here that can wipe your wallet, so please be cautious when using this.
-# There are also functions that can take a seed or private key as plain text.
-# Do not use these functions on a shared server as your seed/private key may be visible to others.
+# There are also functions that take a seed or private key as plain text.
+# Do not use these functions on a shared server as your seed/private key will be visible to others.
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
@@ -26,6 +26,7 @@ NANO_FUNCTIONS_VERSION=0.92
 #          - Bugfix
 #                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
 #                   - Fix block_info_balance related commands for non-state blocks.
+#                   - Add a warning message to deter people from trying to use this script on the real nano network
 
 #
 # Last Changed By: M. Saunders
@@ -63,6 +64,11 @@ check_dependencies() {
   which md5sum > /dev/null
   [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
   return 0
+}
+
+print_warning() {
+  echo "Please do NOT use this script on the LIVE nano network."
+  echo "It is strictly for testing purposes, and is only for the BETA and TEST nano networks"
 }
 
 unregex() {
@@ -545,6 +551,7 @@ generate_spam_sends_to_file() {
   [[ -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} exists. This file should be empty before generating new blocks." && return 4
 
   local PREVIOUS_BLOCK_HASH=
+  local CURRENT_BALANCE=
   for ((idx=0; idx < ${BLOCKS_TO_CREATE}; idx++)); do
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
@@ -565,10 +572,13 @@ __generate_spam_send_to_file() {
     # Send one RAW
     __create_send_block_privkey $@ 1
     if [[ ${#BLOCK_HASH} -eq 64 ]]; then
-      debug " ? Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
+      debug "Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
       echo "${BLOCK}" >> "${BLOCK_STORE}"
-      debug " ? Storing hash in ${BLOCK_STORE}.hash."
+      debug "Storing hash in ${BLOCK_STORE}.hash."
       echo "${BLOCK_HASH}" >> "${BLOCK_STORE}.hash"
+      CURRENT_BALANCE=$(echo "${BLOCK}" | grep -oP '\\"balance\\"\:\s{0,}\\"[0-9]+' | cut -d'"' -f4)
+      [[ 0 -ne $(is_integer ${CURRENT_BALANCE}) ]] && error "Unable to determine value in block just generated. Aborting..." && return 2
+      debug "Holding balance value from block just generated as: ${CURRENT_BALANCE}"
     else
       error "Invalid block hash when creating send block. Got ${BLOCK_HASH:-EMPTY_HASH} Aborting..."
       debug "BLOCK FROM __create_send_block_privkey ON FAILURE: ${BLOCK:-EMPTY_BLOCK}"
@@ -698,16 +708,15 @@ __create_send_block_privkey() {
   local DESTACCOUNT=${3:-}
   local AMOUNT_RAW=${4:-}
   local IGNORE_BLOCK_COUNT_CHECK=${IGNORE_BLOCK_COUNT_CHECK:-0}
-  local PREVIOUS=${PREVIOUS:-}
 
   if [[ $IGNORE_BLOCK_COUNT_CHECK -eq 0 ]]; then
     [[ $(is_local_and_remote_block_counts_similar) -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
   fi  
 
-  [[ -z "${PREVIOUS}" ]] && PREVIOUS=$(get_frontier_hash_from_account ${SRCACCOUNT})
+  local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account sending funds had no previous block, or previous block hash is invalid." && return 5
 
-  local CURRENT_BALANCE=$(get_balance_from_account ${SRCACCOUNT})
+  local CURRENT_BALANCE=${CURRENT_BALANCE:-$(get_balance_from_account ${SRCACCOUNT})}
   if [[ $(echo "${AMOUNT_RAW} != 0" | bc) -eq 1 && ( -z "$CURRENT_BALANCE" || $(echo "${CURRENT_BALANCE} == 0" | bc) -eq 1 ) ]]; then
     error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null or zero, no funds are available to send." && return 4
   fi  
@@ -827,4 +836,6 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=0609a73429c63ea14cbf85322c5cad40
+print_warning
+
+NANO_FUNCTIONS_HASH=cc35408ad1147d503ac5a914351f8770
