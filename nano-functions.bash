@@ -99,7 +99,7 @@ update_nano_functions() {
   local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
   if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
     curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
-    if [[ $? -eq 0 ]]; then
+    if [[ $? -eq 0 && -n $(grep NANO_FUNCTIONS_HASH "${NANO_FUNCTIONS_LOCATION}.new") ]]; then
       local OLD_SCRIPT_HASH="$(get_nano_functions_md5sum)"
       if [[ "${OLD_SCRIPT_HASH}" == "${NANO_FUNCTIONS_HASH}" ]]; then
         echo "Hash check for ${NANO_FUNCTIONS_LOCATION} succeeded and matched internal hash."
@@ -761,4 +761,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=44de30675cbe9ae60cb9c3789b034c72
+NANO_FUNCTIONS_HASH=9b5bbaea8297693bba01dd16b8ed5ec7
