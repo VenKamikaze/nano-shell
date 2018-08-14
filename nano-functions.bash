@@ -545,7 +545,7 @@ generate_spam_sends_to_file() {
   [[ -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} exists. This file should be empty before generating new blocks." && return 4
 
   local PREVIOUS_BLOCK_HASH=
-  for idx in {1..${BLOCKS_TO_CREATE}}; do
+  for ((idx=0; idx < ${BLOCKS_TO_CREATE}; idx++)); do
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
     local IGNORE_BLOCK_COUNT_CHECK=1
@@ -827,4 +827,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=9d25a472e8f452aefa449c9bf1c800d1
+NANO_FUNCTIONS_HASH=0609a73429c63ea14cbf85322c5cad40
