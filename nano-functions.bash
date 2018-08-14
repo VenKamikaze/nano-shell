@@ -126,7 +126,7 @@ update_nano_functions() {
 
 get_nano_functions_md5sum() {
   local NANO_FUNCTIONS_HASH=$(grep -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | md5sum)
-  echo "${NANO_FUNCTIONS_HASH}"
+  echo "${NANO_FUNCTIONS_HASH:0:32}"
 }
 
 #######################################
@@ -761,4 +761,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=9b5bbaea8297693bba01dd16b8ed5ec7
+NANO_FUNCTIONS_HASH=a245471fdd641b3d3b8dab3922974f40
