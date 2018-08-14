@@ -519,6 +519,22 @@ send_block() {
   fi
 }
 
+generate_spam_and_broadcast() {
+  [[ $# -ne 3 ]] && error "Invalid parameters
+                    expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
+
+  [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
+  [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(/usr/bin/mktemp --tmpdir block_store_temp.XXXXX)
+
+  generate_spam_sends_to_file
+  [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && /bin/rm -f "${BLOCK_STORE}" && return 1
+
+  send_pre-generated_blocks
+  local RET=$?
+  [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && /bin/rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
+  [[ -f "${BLOCK_STORE}" ]] && /bin/rm -f "${BLOCK_STORE}"
+}
+
 generate_spam_sends_to_file() {
   [[ $# -ne 3 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
@@ -562,6 +578,17 @@ __generate_spam_send_to_file() {
     expected: PRIVKEY SOURCE DESTACCOUNT"
     return 9
   fi
+}
+
+send_pre-generated_blocks() {
+  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
+
+  while read line; do
+    broadcast_block "${line}"
+  done < "${BLOCK_STORE}"
+
+  debug "Finished broadcasting blocks in ${BLOCK_STORE}. Renaming file to ${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
+  mv "${BLOCK_STORE}" "${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
 }
 
 #######################################
@@ -765,4 +792,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=30223851ea59a94e6fdf6afa00eef34e
+NANO_FUNCTIONS_HASH=020e418593a10a6f982e00798886a25c
