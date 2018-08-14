@@ -20,6 +20,7 @@ NANO_FUNCTIONS_VERSION=0.92
 #                   - Add remote_block_count function to retrieve block counts from trusted remote nodes
 #                   - Add get_account_public_key function
 #                   - Add state block version of 'send_block'
+#                   - Add generate_spam functions for stress testing
 #          - Bugfix
 #                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
 #                   - Fix block_info_balance related commands for non-state blocks.
@@ -37,7 +38,9 @@ NANO_FUNCTIONS_VERSION=0.92
 
 NODEHOST="127.0.0.1:55000"
 DEBUG=${DEBUG:-0}
-DEBUGLOG="${DEBUGLOG:-$(dirname $(readlink -f ${BASH_SOURCE[0]}))/nano-functions.log}"
+SCRIPT_FILENAME="$(basename $(readlink -f ${BASH_SOURCE[0]}))"
+SCRIPT_FILENAME="${SCRIPT_FILENAME%.*}"
+DEBUGLOG="${DEBUGLOG:-$(dirname $(readlink -f ${BASH_SOURCE[0]}))/${SCRIPT_FILENAME}.log}"
 
 NANO_FUNCTIONS_LOCATION=$(readlink -f ${BASH_SOURCE[0]})
 
@@ -66,6 +69,16 @@ unregex() {
   sed -e 's/[]\/()$*.^|[]/\\&/g' <<< "${1:-}"
 }
 
+# C style return values suck and always confuse me when making shell scripts
+# However, we will make this function return C style exit codes
+# E.g. 1 means error (not an integer) 
+#      0 means success (is an integer)
+is_integer() {
+  local INPUT="${1:-}"
+  [[ -n ${INPUT//[0-9]/} ]] && return 1
+  return 0
+}
+
 debug() {
   if [[ 1 -eq ${DEBUG} && -w "${DEBUGLOG}" ]]; then
     echo -n " ? ${FUNCNAME[1]:-#SHELL#}: " >> "${DEBUGLOG}"
@@ -87,11 +100,22 @@ update_nano_functions() {
   if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
     curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
     if [[ $? -eq 0 ]]; then
-      echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
-      mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
-      mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
-      echo "Script ${NANO_FUNCTIONS_LOCATION} has been replaced with the latest copy. If you have problems, you can find the previous version of the script here: ${NANO_FUNCTIONS_LOCATION}.old"
-      [[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
+      local OLD_SCRIPT_HASH="$(get_nano_functions_md5sum)"
+      if [[ "${OLD_SCRIPT_HASH}" == "${NANO_FUNCTIONS_HASH}" ]]; then
+        echo "Hash check for ${NANO_FUNCTIONS_LOCATION} succeeded and matched internal hash."
+        echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
+        mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
+        mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
+        echo "Script ${NANO_FUNCTIONS_LOCATION} has been replaced with the latest copy. If you have problems, you can find the previous version of the script here: ${NANO_FUNCTIONS_LOCATION}.old"
+        [[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
+      else
+        echo "---------------------------------------------------------------------------------------"
+        echo "Calculated hash for ${NANO_FUNCTIONS_LOCATION} did not match internal hash."
+        echo "This means you have custom modifications to your nano-functions script."
+        echo "We have downloaded the new version of nano-functions as ${NANO_FUNCTIONS_LOCATION}.new."
+        echo "To protect your custom modifications, we are not automatically overwriting your copy."
+        echo "You must manually replace your old script to complete your upgrade."
+      fi
     else
       echo "Unable to download ${SOURCE_URL}. Failed to update." >&2 && return 1
     fi
@@ -444,9 +468,9 @@ raw_to_mnano() {
 }
 
 #######################################
-#Deprecated - use state block type now.
+# DEPRECATED: This is the NON-STATE version for generating an open block and broadcasting it.
 # Also, this never worked. Seems to want a key instead of wallet.
-open_block_old() {
+open_block_DEPRECATED() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
   local BLOCK_TO_RECEIVE=${3:-}
@@ -478,10 +502,11 @@ open_block() {
   fi
 }
 
-#Wrapper that calls the appropriate internal __open_block methods based on parameters passed in
+#Wrapper that calls the appropriate internal __create_send_block_.* methods based on parameters passed in
 send_block() {
   if [[ $# -eq 4 ]]; then
-    __send_block_privkey $@
+    local NEWBLOCK=$(__create_send_block_privkey $@)
+    broadcast_block "${NEWBLOCK}"
   elif [[ $# -eq 5 ]]; then
     error "NOT YET IMPLEMENTED"
     return 10
@@ -493,6 +518,50 @@ send_block() {
     return 9
   fi
 }
+
+generate_spam_sends_to_file() {
+  [[ $# -ne 3 ]] && error "Invalid parameters
+                    expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
+
+  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
+  [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method."
+
+  local PREVIOUS_BLOCK_HASH=
+  for idx in {1..${BLOCKS_TO_CREATE}}; do
+
+    local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
+    local IGNORE_BLOCK_COUNT_CHECK=1
+    generate_spam_send_to_file $@
+    [[ $? -ne 0 ]] && error "Bombing out due to error in generate_spam_send_to_file" && return 1
+
+    [[ "${PREVIOUS_BLOCK_HASH}" == "${BLOCK_HASH}" ]] && error "VALIDATION FAILED: Previously generated hash matches hash just generated." && return 2
+    PREVIOUS_BLOCK_HASH="${BLOCK_HASH}"
+  done
+}
+
+__generate_spam_send_to_file() {
+  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
+
+  if [[ $# -eq 3 ]]; then
+    
+    local NEWBLOCK=$(__create_send_block_privkey $@ 0)
+    if [[ ${#BLOCK_HASH} -eq 64 ]]; then
+      debug "Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
+      echo "${NEWBLOCK}" >> "${BLOCK_STORE}"
+    else
+      error "Invalid block hash when creating send block. Got ${BLOCK_HASH}. Aborting..."
+      return 1
+    fi
+  else
+    error "Invalid parameters
+    expected: PRIVKEY SOURCE DESTACCOUNT"
+    return 9
+  fi
+}
+
+#######################################
+# Block generation functions
+#######################################
 
 __open_block_privkey() {
   local PRIVKEY=${1:-}
@@ -589,32 +658,35 @@ __open_block_wallet() {
   broadcast_block "${BLOCK}"
 }
 
-
-__send_block_privkey() {
+__create_send_block_privkey() {
   error "WIP - NOT YET IMPLEMENTED" && return 10
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
   local DESTACCOUNT=${3:-}
   local AMOUNT_RAW=${4:-}
+  local IGNORE_BLOCK_COUNT_CHECK=${IGNORE_BLOCK_COUNT_CHECK:-0}
+  local PREVIOUS=${PREVIOUS:-}
 
-  local LOCAL_CHAIN_UP_TO_DATE=$(is_local_and_remote_block_counts_similar)
-  [[ $LOCAL_CHAIN_UP_TO_DATE -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
+  if [[ $IGNORE_BLOCK_COUNT_CHECK -ne 0 ]]; then
+    [[ $(is_local_and_remote_block_counts_similar) -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
+  fi  
 
-  local PREVIOUS=$(get_frontier_hash_from_account ${SRCACCOUNT})
-  [[ -z "$PREVIOUS" ]] && error "VALIDATION FAILED: Account sending funds had no previous block." && return 5
+  [[ -z "${PREVIOUS}" ]] && PREVIOUS=$(get_frontier_hash_from_account ${SRCACCOUNT})
+  [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account sending funds had no previous block, or previous block hash is invalid." && return 5
+
   local CURRENT_BALANCE=$(get_balance_from_account ${SRCACCOUNT})
-  if [[ -z "$CURRENT_BALANCE" || $(echo "${CURRENT_BALANCE} == 0" | bc) -eq 1 ]]; then
+  if [[ $(echo "${AMOUNT_RAW} != 0" | bc) -eq 1 && ( -z "$CURRENT_BALANCE" || $(echo "${CURRENT_BALANCE} == 0" | bc) -eq 1 ) ]]; then
     error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null or zero, no funds are available to send." && return 4
-  fi
+  fi  
 
   if [[ $(echo "${AMOUNT_RAW} > ${CURRENT_BALANCE}" | bc) -eq 1 ]]; then
     error "VALIDATION FAILED: You are attempting to send an amount greater than the balance of $SRCACCOUNT." && return 7
-  fi
+  fi  
 
   local NEW_BALANCE=$(echo "${CURRENT_BALANCE} - ${AMOUNT_RAW}" | bc)
   if [[ $(echo "${NEW_BALANCE} > ${CURRENT_BALANCE}" | bc) -eq 1 ]]; then
     error "VALIDATION FAILED: Post send balance is greater than existing balance. Are you trying to send a negative amount?." && return 8
-  fi
+  fi  
 
   local DESTACCOUNT_PUBKEY=$(get_account_public_key "${DESTACCOUNT}")
   [[ ${#DESTACCOUNT_PUBKEY} -ne 64 ]] && error "VALIDATION FAILED: Public key for ${DESTACCOUNT} should be 64 characters. Got ${DESTACCOUNT_PUBKEY}" && return 9
@@ -635,20 +707,25 @@ __send_block_privkey() {
   if [[ "${RET}" != *"\"destination\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
     error "VALIDATION FAILED: Response did not contain destination account: ${DESTACCOUNT}"
     return 1
-  fi  
+  fi
   if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
     error "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}"
     return 2
-  fi  
+  fi
   if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
     error "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}"
     return 3
-  fi  
+  fi
+
+  BLOCK_HASH=$(echo "${RET}" | grep hash | grep -oP ':(.*)' | cut -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
 
   local TEMPV=$(echo "${RET}" | grep block | grep -oP ':(.*)')
   local BLOCK=$(strip_block "${TEMPV}")
   echo "$BLOCK"
-  broadcast_block "${BLOCK}"
 }
 
 # DEPRECATED: This is the NON-STATE version for generating a send block and broadcasting it.
@@ -684,4 +761,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=4d9a7e431a83fc60eb286188fd87b6fd
+NANO_FUNCTIONS_HASH=44de30675cbe9ae60cb9c3789b034c72
