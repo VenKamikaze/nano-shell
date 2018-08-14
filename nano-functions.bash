@@ -215,13 +215,13 @@ get_balance_from_account() {
 
 get_account_representative() {
   local ACCOUNT=${1:-}
-  local RET=$(curl -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" )
+  local RET=$(curl -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | grep representative | cut -d'"' -f4)
   echo $RET
 }
 
 get_account_public_key() {
   local ACCOUNT=${1:-}
-  local RET=$(curl -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" )
+  local RET=$(curl -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | grep key | cut -d'"' -f4)
   echo $RET
 }
 
@@ -523,15 +523,17 @@ generate_spam_sends_to_file() {
   [[ $# -ne 3 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
 
-  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
-  [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method."
+  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
+  [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
+
+  [[ -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} exists. This file should be empty before generating new blocks." && return 4
 
   local PREVIOUS_BLOCK_HASH=
   for idx in {1..${BLOCKS_TO_CREATE}}; do
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
     local IGNORE_BLOCK_COUNT_CHECK=1
-    generate_spam_send_to_file $@
+    __generate_spam_send_to_file $@
     [[ $? -ne 0 ]] && error "Bombing out due to error in generate_spam_send_to_file" && return 1
 
     [[ "${PREVIOUS_BLOCK_HASH}" == "${BLOCK_HASH}" ]] && error "VALIDATION FAILED: Previously generated hash matches hash just generated." && return 2
@@ -544,12 +546,15 @@ __generate_spam_send_to_file() {
 
   if [[ $# -eq 3 ]]; then
     
-    local NEWBLOCK=$(__create_send_block_privkey $@ 0)
+    __create_send_block_privkey $@ 0
     if [[ ${#BLOCK_HASH} -eq 64 ]]; then
-      debug "Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
-      echo "${NEWBLOCK}" >> "${BLOCK_STORE}"
+      debug " ? Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
+      echo "${BLOCK}" >> "${BLOCK_STORE}"
+      debug " ? Storing hash in ${BLOCK_STORE}.hash."
+      echo "${BLOCK_HASH}" >> "${BLOCK_STORE}.hash"
     else
-      error "Invalid block hash when creating send block. Got ${BLOCK_HASH}. Aborting..."
+      error "Invalid block hash when creating send block. Got ${BLOCK_HASH:-EMPTY_HASH} Aborting..."
+      debug "BLOCK FROM __create_send_block_privkey ON FAILURE: ${BLOCK:-EMPTY_BLOCK}"
       return 1
     fi
   else
@@ -659,7 +664,6 @@ __open_block_wallet() {
 }
 
 __create_send_block_privkey() {
-  error "WIP - NOT YET IMPLEMENTED" && return 10
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
   local DESTACCOUNT=${3:-}
@@ -667,7 +671,7 @@ __create_send_block_privkey() {
   local IGNORE_BLOCK_COUNT_CHECK=${IGNORE_BLOCK_COUNT_CHECK:-0}
   local PREVIOUS=${PREVIOUS:-}
 
-  if [[ $IGNORE_BLOCK_COUNT_CHECK -ne 0 ]]; then
+  if [[ $IGNORE_BLOCK_COUNT_CHECK -eq 0 ]]; then
     [[ $(is_local_and_remote_block_counts_similar) -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
   fi  
 
@@ -704,8 +708,8 @@ __create_send_block_privkey() {
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"destination\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
-    error "VALIDATION FAILED: Response did not contain destination account: ${DESTACCOUNT}"
+  if [[ "${RET}" != *"\"link_as_account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain destination account in link_as_account field: ${DESTACCOUNT}"
     return 1
   fi
   if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
@@ -724,7 +728,7 @@ __create_send_block_privkey() {
   debug "------------------"
 
   local TEMPV=$(echo "${RET}" | grep block | grep -oP ':(.*)')
-  local BLOCK=$(strip_block "${TEMPV}")
+  BLOCK=$(strip_block "${TEMPV}")
   echo "$BLOCK"
 }
 
@@ -761,4 +765,4 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-NANO_FUNCTIONS_HASH=a245471fdd641b3d3b8dab3922974f40
+NANO_FUNCTIONS_HASH=30223851ea59a94e6fdf6afa00eef34e
