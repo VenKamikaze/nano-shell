@@ -941,4 +941,4 @@ print_warning
 [[ -z "${NANO_NETWORK_TYPE:-}" ]] && NANO_NETWORK_TYPE=$(determine_network)
 [[ "${NANO_NETWORK_TYPE}" == "OTHER" ]] && error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
 
-NANO_FUNCTIONS_HASH=aa741d27cba2d2f6617e425ab116d33e
+NANO_FUNCTIONS_HASH=9285e4e45225ded7d732e71f33cce9dd
