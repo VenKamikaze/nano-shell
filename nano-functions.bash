@@ -12,16 +12,18 @@ NANO_FUNCTIONS_VERSION=0.93
 
 # Version: 0.93
 #          - Feature (TODO)
-#                   - remote_block_count available for BETA network (meltingice only for now) (DONE)
+#                   - remote_block_count available for BETA network (meltingice only for now)
 #                   - Set an environment variable on sourcing this script that indicates 
-#                       if we are on the BETA network or the LIVE network (DONE)
+#                       if we are on the BETA network, PROD network or OTHER network
 #                   - Check if NODEHOST can be contacted on sourcing this script. Give a nice message if not.
 #                   - New generate_spam_and_broadcast_forever function to loop forever until interrupted
 #                   - New get_account_pending function.
 #                   - New available_supply function.
-#
+#                   - New is_node_up function.
 #          - Bugfix
 #                   - Clean up remote_block_count error logging
+#          - Refactor
+#                   - Move around some functions so they are grouped a little better
 
 # Last Changed By: M. Saunders
 # -------------------------------
@@ -965,4 +967,4 @@ print_warning
 [[ -z "${NANO_NETWORK_TYPE:-}" ]] && NANO_NETWORK_TYPE=$(determine_network)
 [[ "${NANO_NETWORK_TYPE}" == "OTHER" ]] && error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
 
-NANO_FUNCTIONS_HASH=517141a688ee03467ad0fb5af3f70aa5
+NANO_FUNCTIONS_HASH=f6720b847fd994f1fc864ec1b4e06f82
