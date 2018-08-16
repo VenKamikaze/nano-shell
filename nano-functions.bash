@@ -421,6 +421,12 @@ account_create() {
 #   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
 wallet_change_seed_UNSAFE() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  if [[ $# -ne 2 ]]; then
+    error "Invalid parameters
+    expected: WALLETUUID SEED"
+    return 9
+  fi
+
   local WALLET=${1:-}
   local SEED=${2:-}
   local RET=$(curl -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
@@ -429,6 +435,12 @@ wallet_change_seed_UNSAFE() {
 
 wallet_change_seed() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  if [[ $# -ne 2 ]]; then
+    error "Invalid parameters
+    expected: WALLETUUID SEED_FILE"
+    return 9
+  fi
+
   local WALLET=${1:-}
   local SEED_FILE=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
@@ -440,6 +452,12 @@ wallet_change_seed() {
 #   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
 query_deterministic_keys_UNSAFE() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  if [[ $# -ne 2 ]]; then
+    error "Invalid parameters
+    expected: SEED INDEX"
+    return 9
+  fi
+
   local SEED=${1:-}
   local INDEX=${2:-}
   echo SEED $SEED
@@ -449,6 +467,12 @@ query_deterministic_keys_UNSAFE() {
 
 query_deterministic_keys() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  if [[ $# -ne 2 ]]; then
+    error "Invalid parameters
+    expected: SEED_FILE INDEX"
+    return 9
+  fi
+
   local SEED_FILE=${1:-}
   local INDEX=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
