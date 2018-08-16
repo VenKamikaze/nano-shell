@@ -12,14 +12,16 @@ NANO_FUNCTIONS_VERSION=0.93
 
 # Version: 0.93
 #          - Feature (TODO)
-#                   - Pull block count from beta API (meltingice only for now) (DONE)
+#                   - remote_block_count available for BETA network (meltingice only for now) (DONE)
 #                   - Set an environment variable on sourcing this script that indicates 
 #                       if we are on the BETA network or the LIVE network (DONE)
-#                   - Determine circulating supply - checks all pending transactions on the Burn address,
-#                       minus the initial supply.
 #                   - Check if NODEHOST can be contacted on sourcing this script. Give a nice message if not.
-#          - Bugfix (TODO)
-#                   - Handle failures when remote node block counts cannot be retrieved.
+#                   - New generate_spam_and_broadcast_forever function to loop forever until interrupted
+#                   - New get_account_pending function.
+#                   - New available_supply function.
+#
+#          - Bugfix
+#                   - Clean up remote_block_count error logging
 
 # Last Changed By: M. Saunders
 # -------------------------------
@@ -98,6 +100,16 @@ check_dependencies() {
   return 0
 }
 
+# C style return values suck and always confuse me when making shell scripts
+# However, we will make this function return C style exit codes
+# E.g. 1 means error (not an integer) 
+#      0 means success (is an integer)
+is_node_up() {
+  local RET=$(block_count)
+  [[ "${RET}" == *"count"* ]] && echo "Node is running" && return 0
+  error "Your node does not appear to be running. Cannot reach ${NODEHOST}." && return 1
+}
+
 determine_network() {
   local BLOCK_HASH=$(block_info_previous_hash "ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113" 2>/dev/null)
   [[ ${#BLOCK_HASH} -eq 64 ]] && echo "PROD" && return 0
@@ -113,20 +125,11 @@ print_warning() {
   echo "It is strictly for testing purposes, and is only for the BETA and TEST nano networks"
 }
 
-unregex() {
-  # This is a function because dealing with quotes is a pain.
-  # http://stackoverflow.com/a/2705678/120999
-  sed -e 's/[]\/()$*.^|[]/\\&/g' <<< "${1:-}"
-}
+# Many of the functions in this script require a special environment variable to be set before they will function
+#   This is just a very small safety check to make sure people think about what they are trying to do.
 
-# C style return values suck and always confuse me when making shell scripts
-# However, we will make this function return C style exit codes
-# E.g. 1 means error (not an integer) 
-#      0 means success (is an integer)
-is_integer() {
-  local INPUT="${1:-}"
-  [[ -n ${INPUT//[0-9]/} ]] && return 1
-  return 0
+allow_unsafe_commands() {
+  [[ 1 -eq ${NANO_UNSAFE_COMMANDS:-0} ]] && echo 1 || (echo "NANO_UNSAFE_COMMANDS is not set to 1. Ignoring all unsafe commands" >&2 && echo 0)
 }
 
 debug() {
@@ -141,47 +144,15 @@ error() {
   echo " !! $@" >&2
 }
 
-update_nano_functions() {
-  local TESTING=${1:-}
-  local BRANCH="master"
-  [[ "${TESTING}" == "testing" ]] && BRANCH="develop"
-  [[ "${TESTING}" == "bleeding" ]] && BRANCH="develop-next" && echo "WARNING: DO NOT USE THIS BRANCH ON THE LIVE NANO NETWORK. TESTING ONLY"
-  local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
-  if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
-    curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
-    if [[ $? -eq 0 && -n $(grep NANO_FUNCTIONS_HASH "${NANO_FUNCTIONS_LOCATION}.new") ]]; then
-      local OLD_SCRIPT_HASH="$(get_nano_functions_md5sum)"
-      if [[ "${OLD_SCRIPT_HASH}" == "${NANO_FUNCTIONS_HASH}" ]]; then
-        echo "Hash check for ${NANO_FUNCTIONS_LOCATION} succeeded and matched internal hash."
-        echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
-        mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
-        mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
-        echo "Script ${NANO_FUNCTIONS_LOCATION} has been replaced with the latest copy. If you have problems, you can find the previous version of the script here: ${NANO_FUNCTIONS_LOCATION}.old"
-        [[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
-      else
-        echo "---------------------------------------------------------------------------------------"
-        echo "Calculated hash for ${NANO_FUNCTIONS_LOCATION} did not match internal hash."
-        echo "This means you have custom modifications to your nano-functions script."
-        echo "We have downloaded the new version of nano-functions as ${NANO_FUNCTIONS_LOCATION}.new."
-        echo "To protect your custom modifications, we are not automatically overwriting your copy."
-        echo "You must manually replace your old script to complete your upgrade."
-      fi
-    else
-      echo "Unable to download ${SOURCE_URL}. Failed to update." >&2 && return 1
-    fi
-  else
-    echo "${NANO_FUNCTIONS_LOCATION} not writable or was not set. Failed to update." >&2 && return 1
-  fi
-}
-
-get_nano_functions_md5sum() {
-  local NANO_FUNCTIONS_HASH=$(grep -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | md5sum)
-  echo "${NANO_FUNCTIONS_HASH:0:32}"
-}
-
 #######################################
 # Query commands
 #######################################
+
+available_supply() {
+  local ACCOUNT=${1:-}
+  local RET=$(curl -g -d '{ "action": "available_supply" }' "${NODEHOST}" | grep available | cut -d'"' -f4)
+  echo $RET
+}
 
 block_count() {
   curl -g -d '{ "action": "block_count" }' "${NODEHOST}"
@@ -192,7 +163,7 @@ remote_block_count_nanonodeninja() {
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
     RET=$(curl -m5 -g "https://nanonode.ninja/api/blockcount" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   else
-    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorers. Cannot determine remote block count."
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanonodeninja. Cannot determine remote block count."
   fi
 
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
@@ -205,19 +176,18 @@ remote_block_count_nanomeltingice() {
   elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
     RET=$(curl -m5 -g "https://beta.nano-api.meltingice.net/block_count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   else
-    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer. Cannot determine remote block count."
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at meltingice. Cannot determine remote block count."
   fi
 
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
 remote_block_count_nanowatch() {
-  [[ $? -eq 0 ]] && echo $RET || echo 0
   local RET=
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
     RET=$(curl -m5 -g "https://api.nanowat.ch/blocks/count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   else
-    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorers. Cannot determine remote block count."
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanowatch. Cannot determine remote block count."
   fi
 
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
@@ -225,11 +195,11 @@ remote_block_count_nanowatch() {
 
 remote_block_count() {
   let GOT_RESULTS=3
-  local COUNT1=$(remote_block_count_nanonodeninja)
+  local COUNT1=$(remote_block_count_nanonodeninja 2>/dev/null)
   [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT2=$(remote_block_count_nanowatch)
+  local COUNT2=$(remote_block_count_nanowatch 2>/dev/null)
   [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT3=$(remote_block_count_nanomeltingice)
+  local COUNT3=$(remote_block_count_nanomeltingice 2>/dev/null)
   [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   
   if [[ 0 -eq $GOT_RESULTS ]]; then
@@ -281,6 +251,12 @@ get_frontier_hash_from_account() {
 get_balance_from_account() {
   local ACCOUNT=${1:-}
   local RET=$(curl -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | grep balance | cut -d'"' -f4)
+  echo $RET
+}
+
+get_account_pending() {
+  local ACCOUNT=${1:-}
+  local RET=$(curl -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | grep pending | cut -d'"' -f4)
   echo $RET
 }
 
@@ -396,12 +372,6 @@ block_info_amount_mnano() {
 # Wallet commands
 #######################################
 
-# All of these commands require a special environment variable to be set before they will function
-#   This is just a very small safety check to make sure we don't accidentally run anything we don't want to do.
-
-allow_unsafe_commands() {
-  [[ 1 -eq ${NANO_UNSAFE_COMMANDS:-0} ]] && echo 1 || (echo "NANO_UNSAFE_COMMANDS is not set to 1. Ignoring all unsafe commands" >&2 && echo 0)
-}
 
 wallet_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
@@ -513,6 +483,12 @@ broadcast_block() {
 # Convenience functions
 #######################################
 
+unregex() {
+  # This is a function because dealing with quotes is a pain.
+  # http://stackoverflow.com/a/2705678/120999
+  sed -e 's/[]\/()$*.^|[]/\\&/g' <<< "${1:-}"
+}
+
 strip_block() {
   local TEMPV="${1:-}"
   #Strip ': "' from front and '"' from back.
@@ -529,6 +505,54 @@ raw_to_mnano() {
 
   local RET=$(echo "scale=2; ${RAW_AMOUNT} / ${ONE_MNANO}" | bc)
   echo $RET
+}
+
+# C style return values suck and always confuse me when making shell scripts
+# However, we will make this function return C style exit codes
+# E.g. 1 means error (not an integer) 
+#      0 means success (is an integer)
+is_integer() {
+  local INPUT="${1:-}"
+  [[ -n ${INPUT//[0-9]/} ]] && return 1
+  return 0
+}
+
+update_nano_functions() {
+  local TESTING=${1:-}
+  local BRANCH="master"
+  [[ "${TESTING}" == "testing" ]] && BRANCH="develop"
+  [[ "${TESTING}" == "bleeding" ]] && BRANCH="develop-next" && echo "WARNING: DO NOT USE THIS BRANCH ON THE LIVE NANO NETWORK. TESTING ONLY"
+  local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
+  if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
+    curl -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
+    if [[ $? -eq 0 && -n $(grep NANO_FUNCTIONS_HASH "${NANO_FUNCTIONS_LOCATION}.new") ]]; then
+      local OLD_SCRIPT_HASH="$(get_nano_functions_md5sum)"
+      if [[ "${OLD_SCRIPT_HASH}" == "${NANO_FUNCTIONS_HASH}" ]]; then
+        echo "Hash check for ${NANO_FUNCTIONS_LOCATION} succeeded and matched internal hash."
+        echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
+        mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
+        mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
+        echo "Script ${NANO_FUNCTIONS_LOCATION} has been replaced with the latest copy. If you have problems, you can find the previous version of the script here: ${NANO_FUNCTIONS_LOCATION}.old"
+        [[ $? -eq 0 ]] && echo Sourcing updated script && source "${NANO_FUNCTIONS_LOCATION}"
+      else
+        echo "---------------------------------------------------------------------------------------"
+        echo "Calculated hash for ${NANO_FUNCTIONS_LOCATION} did not match internal hash."
+        echo "This means you have custom modifications to your nano-functions script."
+        echo "We have downloaded the new version of nano-functions as ${NANO_FUNCTIONS_LOCATION}.new."
+        echo "To protect your custom modifications, we are not automatically overwriting your copy."
+        echo "You must manually replace your old script to complete your upgrade."
+      fi
+    else
+      echo "Unable to download ${SOURCE_URL}. Failed to update." >&2 && return 1
+    fi
+  else
+    echo "${NANO_FUNCTIONS_LOCATION} not writable or was not set. Failed to update." >&2 && return 1
+  fi
+}
+
+get_nano_functions_md5sum() {
+  local NANO_FUNCTIONS_HASH=$(grep -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | md5sum)
+  echo "${NANO_FUNCTIONS_HASH:0:32}"
 }
 
 #######################################
@@ -551,6 +575,7 @@ open_block() {
 
 #Wrapper that calls the appropriate internal __create_send_block_.* methods based on parameters passed in
 send_block() {
+  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -eq 4 ]]; then
     local NEWBLOCK=$(__create_send_block_privkey $@)
     broadcast_block "${NEWBLOCK}"
@@ -588,6 +613,16 @@ receive_block() {
 # Stress-test functions
 #######################################
 
+# This function will loop forever until interrupted or until a failure occurs.
+# It loops forever running the 'generate_spam_and_broadcast' function.
+generate_spam_and_broadcast_until_stopped() {
+  while true; do
+    generate_spam_and_broadcast $@
+    [[ $? -ne 0 ]] && error "Call to generate_spam_and_broadcast failed. Aborting infinite loop and exiting..." && return 1
+  done
+}
+
+# This function generates BLOCKS_TO_CREATE blocks, and then immediately sends them
 generate_spam_and_broadcast() {
   [[ $# -ne 3 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
@@ -602,8 +637,10 @@ generate_spam_and_broadcast() {
   local RET=$?
   [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
   [[ -f "${BLOCK_STORE}" ]] && rm -f "${BLOCK_STORE}"
+  return $?
 }
 
+# This function generates BLOCKS_TO_CREATE blocks, and writes them to file BLOCK_STORE
 generate_spam_sends_to_file() {
   [[ $# -ne 3 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
@@ -654,6 +691,7 @@ __generate_spam_send_to_file() {
   fi
 }
 
+# This function broadcasts all blocks contained within file BLOCK_STORE
 send_pre-generated_blocks() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
 
