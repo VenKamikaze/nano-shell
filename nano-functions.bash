@@ -14,6 +14,8 @@ NANO_FUNCTIONS_VERSION=0.9201
 #          - Bugfix
 #                   - generate_spam_and_broadcast was not passing down parameters to called function. (Found by /u/Joohansson)
 #                   - broadcast_block was failing in locating 'mktemp' in Windows 10 Ubuntu shell for at least one user (Found by /u/Joohansson). This is likely an issue in the version of Ubuntu the Win10 shell is based off as well.
+#                   - Subsequently, remove all hard coded paths for executables used in here - our dependency_check should be enough for this, and users can add paths to their $PATH if needed for programs.
+#                   - Increase number of programs checked in dependency_check
 #
 # Version: 0.92
 #          - Refactor
@@ -68,6 +70,10 @@ check_dependencies() {
   [[ $? -eq 1 ]] && echo "mktemp not found." >&2 && return 5
   which md5sum > /dev/null
   [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
+  which sed > /dev/null
+  [[ $? -eq 1 ]] && echo "sed not found." >&2 && return 7
+  which rm > /dev/null
+  [[ $? -eq 1 ]] && echo "rm not found." >&2 && return 8
   return 0
 }
 
@@ -446,7 +452,7 @@ broadcast_block() {
   echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
   local RET=$(curl -g -d @${PAYLOAD_JSON} "${NODEHOST}")
   DEBUG_BROADCAST=$RET
-  [[ ${DEBUG} -eq 0 ]] && /bin/rm -f "${PAYLOAD_JSON}"
+  [[ ${DEBUG} -eq 0 ]] && rm -f "${PAYLOAD_JSON}"
   local HASH=$(echo "${RET}" | grep hash | cut -d'"' -f4)
   echo $HASH
 }
@@ -535,15 +541,15 @@ generate_spam_and_broadcast() {
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
 
   [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
-  [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(/usr/bin/mktemp --tmpdir block_store_temp.XXXXX)
+  [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(mktemp --tmpdir block_store_temp.XXXXX)
 
   generate_spam_sends_to_file $@
-  [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && /bin/rm -f "${BLOCK_STORE}" && return 1
+  [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && rm -f "${BLOCK_STORE}" && return 1
 
   send_pre-generated_blocks
   local RET=$?
-  [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && /bin/rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
-  [[ -f "${BLOCK_STORE}" ]] && /bin/rm -f "${BLOCK_STORE}"
+  [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
+  [[ -f "${BLOCK_STORE}" ]] && rm -f "${BLOCK_STORE}"
 }
 
 generate_spam_sends_to_file() {
@@ -832,7 +838,7 @@ __create_receive_block_privkey() {
 }
 
 stop_node() {
-  local RET=$(/usr/bin/curl -g -d '{ "action": "stop" }' "${NODEHOST}" | /usr/bin/grep success | /usr/bin/cut -d'"' -f2)
+  local RET=$(curl -g -d '{ "action": "stop" }' "${NODEHOST}" | grep success | cut -d'"' -f2)
   echo $RET
 }
 
