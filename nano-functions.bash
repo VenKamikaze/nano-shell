@@ -12,11 +12,14 @@ NANO_FUNCTIONS_VERSION=0.93
 
 # Version: 0.93
 #          - Feature (TODO)
-#                   - Pull block count from beta API (meltingice only for now)
+#                   - Pull block count from beta API (meltingice only for now) (DONE)
 #                   - Set an environment variable on sourcing this script that indicates 
-#                       if we are on the BETA network or the LIVE network
+#                       if we are on the BETA network or the LIVE network (DONE)
 #                   - Determine circulating supply - checks all pending transactions on the Burn address,
 #                       minus the initial supply.
+#                   - Check if NODEHOST can be contacted on sourcing this script. Give a nice message if not.
+#          - Bugfix (TODO)
+#                   - Handle failures when remote node block counts cannot be retrieved.
 
 # Last Changed By: M. Saunders
 # -------------------------------
