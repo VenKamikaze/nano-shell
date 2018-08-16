@@ -13,11 +13,25 @@ NANO_FUNCTIONS_VERSION=0.93
 # Version: 0.93
 #          - Feature (TODO)
 #                   - Pull block count from beta API (meltingice only for now)
-#                   - Set an environment variable on sourcing this script that indicates if we are on the BETA network or the LIVE network
-#                   - Determine circulating supply - checks all pending transactions for Burn address, minus the initial supply.
+#                   - Set an environment variable on sourcing this script that indicates 
+#                       if we are on the BETA network or the LIVE network
+#                   - Determine circulating supply - checks all pending transactions on the Burn address,
+#                       minus the initial supply.
 
 # Last Changed By: M. Saunders
 # -------------------------------
+# Version: 0.9201
+#          - Bugfix
+#                   - generate_spam_and_broadcast was not passing down parameters to called 
+#                       function. (Found by /u/Joohansson)
+#                   - broadcast_block was failing in locating 'mktemp' in Windows 10 Ubuntu shell for at 
+#                       least one user (Found by /u/Joohansson). This is likely also an issue in the version 
+#                       of Ubuntu the Win10 shell is based off too.
+#                   - Subsequently, remove all hard coded paths for executables used in here,
+#                       our dependency_check should be enough for this, and users can add paths to 
+#                       their $PATH if needed for programs.
+#                   - Increase number of programs checked in dependency_check
+#
 # Version: 0.92
 #          - Refactor
 #                   - Make an open_block wrapper that passes to correct function based on parameters given
@@ -25,7 +39,8 @@ NANO_FUNCTIONS_VERSION=0.93
 #                   - Rename existing (non-state) 'send_nano' function to '__send_block_DEPRECATED'
 #                   - Convert to MNano internally instead of using RPC
 #          - Feature
-#                   - Allow pulling down the latest in-development version from 'develop-next' branch via update_nano_functions
+#                   - Allow pulling down the latest in-development version from 'develop-next' branch
+#                       via update_nano_functions
 #                   - Add remote_block_count function to retrieve block counts from trusted remote nodes
 #                   - Add get_account_public_key function
 #                   - Add state block version of 'send_block'
@@ -73,14 +88,18 @@ check_dependencies() {
   [[ $? -eq 1 ]] && echo "mktemp not found." >&2 && return 5
   which md5sum > /dev/null
   [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
+  which sed > /dev/null
+  [[ $? -eq 1 ]] && echo "sed not found." >&2 && return 7
+  which rm > /dev/null
+  [[ $? -eq 1 ]] && echo "rm not found." >&2 && return 8
   return 0
 }
 
 determine_network() {
-  local BLOCK_HASH=$(block_info_previous_hash "ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113")
+  local BLOCK_HASH=$(block_info_previous_hash "ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113" 2>/dev/null)
   [[ ${#BLOCK_HASH} -eq 64 ]] && echo "PROD" && return 0
 
-  BLOCK_HASH=$(block_info_previous_hash "23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23")
+  BLOCK_HASH=$(block_info_previous_hash "23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23" 2>/dev/null)
   [[ ${#BLOCK_HASH} -eq 64 ]] && echo "BETA" && return 1
 
   echo "OTHER" && return 2
@@ -478,11 +497,11 @@ generate_work() {
 broadcast_block() {
   local BLOCK="${1:-}"
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
-  PAYLOAD_JSON=$(/usr/bin/mktemp --tmpdir payload.XXXXX)
+  PAYLOAD_JSON=$(mktemp --tmpdir payload.XXXXX)
   echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
   local RET=$(curl -g -d @${PAYLOAD_JSON} "${NODEHOST}")
   DEBUG_BROADCAST=$RET
-  [[ ${DEBUG} -eq 0 ]] && /bin/rm -f "${PAYLOAD_JSON}"
+  [[ ${DEBUG} -eq 0 ]] && rm -f "${PAYLOAD_JSON}"
   local HASH=$(echo "${RET}" | grep hash | cut -d'"' -f4)
   echo $HASH
 }
@@ -571,15 +590,15 @@ generate_spam_and_broadcast() {
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
 
   [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
-  [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(/usr/bin/mktemp --tmpdir block_store_temp.XXXXX)
+  [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(mktemp --tmpdir block_store_temp.XXXXX)
 
-  generate_spam_sends_to_file
-  [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && /bin/rm -f "${BLOCK_STORE}" && return 1
+  generate_spam_sends_to_file $@
+  [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && rm -f "${BLOCK_STORE}" && return 1
 
   send_pre-generated_blocks
   local RET=$?
-  [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && /bin/rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
-  [[ -f "${BLOCK_STORE}" ]] && /bin/rm -f "${BLOCK_STORE}"
+  [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
+  [[ -f "${BLOCK_STORE}" ]] && rm -f "${BLOCK_STORE}"
 }
 
 generate_spam_sends_to_file() {
@@ -868,7 +887,7 @@ __create_receive_block_privkey() {
 }
 
 stop_node() {
-  local RET=$(/usr/bin/curl -g -d '{ "action": "stop" }' "${NODEHOST}" | /usr/bin/grep success | /usr/bin/cut -d'"' -f2)
+  local RET=$(curl -g -d '{ "action": "stop" }' "${NODEHOST}" | grep success | cut -d'"' -f2)
   echo $RET
 }
 
@@ -881,4 +900,4 @@ print_warning
 [[ -z "${NANO_NETWORK_TYPE:-}" ]] && NANO_NETWORK_TYPE=$(determine_network)
 [[ "${NANO_NETWORK_TYPE}" == "OTHER" ]] && error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
 
-NANO_FUNCTIONS_HASH=b72d3d036d0289e92aae52f048d36bf6
+NANO_FUNCTIONS_HASH=aa741d27cba2d2f6617e425ab116d33e
