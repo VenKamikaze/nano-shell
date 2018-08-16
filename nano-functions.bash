@@ -8,8 +8,13 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.92
+NANO_FUNCTIONS_VERSION=0.9201
 
+# Version: 0.9201
+#          - Bugfix
+#                   - generate_spam_and_broadcast was not passing down parameters to called function. (Found by /u/Joohansson)
+#                   - broadcast_block was failing in locating 'mktemp' in Windows 10 Ubuntu shell for at least one user (Found by /u/Joohansson). This is likely an issue in the version of Ubuntu the Win10 shell is based off as well.
+#
 # Version: 0.92
 #          - Refactor
 #                   - Make an open_block wrapper that passes to correct function based on parameters given
@@ -437,7 +442,7 @@ generate_work() {
 broadcast_block() {
   local BLOCK="${1:-}"
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
-  PAYLOAD_JSON=$(/usr/bin/mktemp --tmpdir payload.XXXXX)
+  PAYLOAD_JSON=$(mktemp --tmpdir payload.XXXXX)
   echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
   local RET=$(curl -g -d @${PAYLOAD_JSON} "${NODEHOST}")
   DEBUG_BROADCAST=$RET
@@ -532,7 +537,7 @@ generate_spam_and_broadcast() {
   [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(/usr/bin/mktemp --tmpdir block_store_temp.XXXXX)
 
-  generate_spam_sends_to_file
+  generate_spam_sends_to_file $@
   [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && /bin/rm -f "${BLOCK_STORE}" && return 1
 
   send_pre-generated_blocks
