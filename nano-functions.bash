@@ -8,8 +8,16 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.92
+NANO_FUNCTIONS_VERSION=0.93
 
+# Version: 0.93
+#          - Feature (TODO)
+#                   - Pull block count from beta API (meltingice only for now)
+#                   - Set an environment variable on sourcing this script that indicates if we are on the BETA network or the LIVE network
+#                   - Determine circulating supply - checks all pending transactions for Burn address, minus the initial supply.
+
+# Last Changed By: M. Saunders
+# -------------------------------
 # Version: 0.92
 #          - Refactor
 #                   - Make an open_block wrapper that passes to correct function based on parameters given
@@ -26,11 +34,7 @@ NANO_FUNCTIONS_VERSION=0.92
 #          - Bugfix
 #                   - Fix debug logging, write to a file (previously echoed to stdout which broke other functions)
 #                   - Fix block_info_balance related commands for non-state blocks.
-#                   - Add a warning message to deter people from trying to use this script on the real nano network
-
 #
-# Last Changed By: M. Saunders
-# -------------------------------
 # Version: 0.91
 #          - Bugfix
 #                   - Rename and enable update_nano_functions
@@ -50,6 +54,12 @@ NANO_FUNCTIONS_LOCATION=$(readlink -f ${BASH_SOURCE[0]})
 ZEROES="0000000000000000000000000000000000000000000000000000000000000000"
 ONE_MNANO="1000000000000000000000000000000"
 
+# Expects values of either: PROD,BETA,OTHER
+NANO_NETWORK_TYPE=
+
+PROD_BURN_TX_HASH=ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113
+BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23
+
 check_dependencies() {
   which bc > /dev/null
   [[ $? -eq 1 ]] && echo "bc not found." >&2 && return 1
@@ -64,6 +74,16 @@ check_dependencies() {
   which md5sum > /dev/null
   [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
   return 0
+}
+
+determine_network() {
+  local BLOCK_HASH=$(block_info_previous_hash "ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113")
+  [[ ${#BLOCK_HASH} -eq 64 ]] && echo "PROD" && return 0
+
+  BLOCK_HASH=$(block_info_previous_hash "23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23")
+  [[ ${#BLOCK_HASH} -eq 64 ]] && echo "BETA" && return 1
+
+  echo "OTHER" && return 2
 }
 
 print_warning() {
@@ -146,18 +166,39 @@ block_count() {
 }
 
 remote_block_count_nanonodeninja() {
-  local RET=$(curl -m5 -g "https://nanonode.ninja/api/blockcount" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
-  [[ $? -eq 0 ]] && echo $RET || echo 0
+  local RET=
+  if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
+    RET=$(curl -m5 -g "https://nanonode.ninja/api/blockcount" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
+  else
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorers. Cannot determine remote block count."
+  fi
+
+  [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
 remote_block_count_nanomeltingice() {
-  local RET=$(curl -m5 -g "https://nano-api.meltingice.net/block_count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
-  [[ $? -eq 0 ]] && echo $RET || echo 0
+  local RET=
+  if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
+    RET=$(curl -m5 -g "https://nano-api.meltingice.net/block_count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
+  elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
+    RET=$(curl -m5 -g "https://beta.nano-api.meltingice.net/block_count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
+  else
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer. Cannot determine remote block count."
+  fi
+
+  [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
 remote_block_count_nanowatch() {
-  local RET=$(curl -m5 -g "https://api.nanowat.ch/blocks/count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
   [[ $? -eq 0 ]] && echo $RET || echo 0
+  local RET=
+  if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
+    RET=$(curl -m5 -g "https://api.nanowat.ch/blocks/count" | grep -oP '\"count\"\:\"[0-9]+\"' | cut -d'"' -f4)
+  else
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorers. Cannot determine remote block count."
+  fi
+
+  [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
 remote_block_count() {
@@ -837,5 +878,7 @@ check_dependencies
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
 print_warning
+[[ -z "${NANO_NETWORK_TYPE:-}" ]] && NANO_NETWORK_TYPE=$(determine_network)
+[[ "${NANO_NETWORK_TYPE}" == "OTHER" ]] && error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
 
-NANO_FUNCTIONS_HASH=cc35408ad1147d503ac5a914351f8770
+NANO_FUNCTIONS_HASH=b72d3d036d0289e92aae52f048d36bf6
