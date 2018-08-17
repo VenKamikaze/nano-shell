@@ -8,9 +8,13 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.93
+NANO_FUNCTIONS_VERSION=0.9301
 
-# Version: 0.93
+# Version: 0.9301
+#          - Bugfix
+#                   - Fix resuming block generation when using generate_spam_sends_to_file, balance was wrong.
+#
+# Version: 0.93 (never released to 'master' branch)
 #          - Feature
 #                   - New generate_spam_and_broadcast_forever function to loop forever until interrupted
 #                   - New get_account_pending function.
@@ -777,17 +781,20 @@ generate_spam_sends_to_file() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
 
+  local CURRENT_BALANCE=
   local PREVIOUS_BLOCK_HASH=
   if [[ -f "${BLOCK_STORE}" ]]; then
     if [[ -f "${BLOCK_STORE}.hash" ]]; then
       echo "File ${BLOCK_STORE} exists, and associated hash file exists. Getting last block hash, will continue generating from that point."
       PREVIOUS_BLOCK_HASH=$(tail -n1 "${BLOCK_STORE}.hash")
+      CURRENT_BALANCE=$(tail -n1 "${BLOCK_STORE}" | grep -oP '\\"balance\\"\:\s{0,}\\"[0-9]+' | cut -d'"' -f4)
+      [[ ${#PREVIOUS_BLOCK_HASH} -ne 64 ]] && error "Previous block hash from file ${BLOCK_STORE}.hash was not a valid hash" && return 4
+      [[ -z ${CURRENT_BALANCE} ]] && error "Balance in last generated block in ${BLOCK_STORE} was not found." && return 5
     else
-      error "File ${BLOCK_STORE} exists, but not associated hash file exists. You should remove ${BLOCK_STORE} before using this function."
+      error "File ${BLOCK_STORE} exists, but not associated hash file exists. You should remove ${BLOCK_STORE} before using this function." && return 6
     fi
   fi
 
-  local CURRENT_BALANCE=
   for ((idx=0; idx < ${BLOCKS_TO_CREATE}; idx++)); do
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
@@ -1082,4 +1089,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=a4bf4bef03365e9828ddca4377fdfaee
+NANO_FUNCTIONS_HASH=09d58a7a8ac9752c4b635bc5f6b94db1
