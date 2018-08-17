@@ -8,8 +8,13 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.9301
+NANO_FUNCTIONS_VERSION=0.9302
 
+# Version: 0.9302
+#          - Bugfix
+#                   - Fix return value from spam function
+#          - Feature
+#                   - Add get_peers to show connected peers
 # Version: 0.9301
 #          - Bugfix
 #                   - Fix resuming block generation when using generate_spam_sends_to_file, balance was wrong.
@@ -277,6 +282,12 @@ nano_version_number() {
 nano_statistics() {
   curl -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
 }
+
+get_peers() {
+  local RET=$(curl -g -d '{ "action": "peers" }' "${NODEHOST}")
+  echo $RET
+}
+
 
 get_account_info() {
   local ACCOUNT=${1:-}
@@ -1090,4 +1101,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=c27ac57f47d54b987800ddd621eae7d2
+NANO_FUNCTIONS_HASH=f1730327cd25e546ac01bdcb2f5eb7e9
