@@ -25,6 +25,7 @@ NANO_FUNCTIONS_VERSION=0.93
 #                       if we are on the BETA network, PROD network or OTHER network
 #                   - remote_block_count available for BETA network (meltingice only for now)
 #                   - Set use_peers to true by default in generate_work (can be overridden by an optional function parameter)
+#                   - Allow resuming block generation from already pre-generated block lists, by re-using BLOCK_STORE file.
 #          - Bugfix
 #                   - Clean up remote_block_count error logging
 #          - Refactor
@@ -109,6 +110,8 @@ check_dependencies() {
   [[ $? -eq 1 ]] && echo "sed not found." >&2 && return 7
   which rm > /dev/null
   [[ $? -eq 1 ]] && echo "rm not found." >&2 && return 8
+  which tail > /dev/null
+  [[ $? -eq 1 ]] && echo "tail not found." >&2 && return 8
   return 0
 }
 
@@ -774,9 +777,16 @@ generate_spam_sends_to_file() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
 
-  [[ -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} exists. This file should be empty before generating new blocks." && return 4
-
   local PREVIOUS_BLOCK_HASH=
+  if [[ -f "${BLOCK_STORE}" ]]; then
+    if [[ -f "${BLOCK_STORE}.hash" ]]; then
+      echo "File ${BLOCK_STORE} exists, and associated hash file exists. Getting last block hash, will continue generating from that point."
+      PREVIOUS_BLOCK_HASH=$(tail -n1 "${BLOCK_STORE}.hash")
+    else
+      error "File ${BLOCK_STORE} exists, but not associated hash file exists. You should remove ${BLOCK_STORE} before using this function."
+    fi
+  fi
+
   local CURRENT_BALANCE=
   for ((idx=0; idx < ${BLOCKS_TO_CREATE}; idx++)); do
 
