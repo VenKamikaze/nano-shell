@@ -11,15 +11,20 @@
 NANO_FUNCTIONS_VERSION=0.93
 
 # Version: 0.93
-#          - Feature (TODO)
-#                   - remote_block_count available for BETA network (meltingice only for now)
-#                   - Set an environment variable on sourcing this script that indicates 
-#                       if we are on the BETA network, PROD network or OTHER network
-#                   - Check if NODEHOST can be contacted on sourcing this script. Give a nice message if not.
+#          - Feature
 #                   - New generate_spam_and_broadcast_forever function to loop forever until interrupted
 #                   - New get_account_pending function.
 #                   - New available_supply function.
 #                   - New is_node_up function.
+#                   - New work peer functions: work_peer_list, work_peer_add, work_peer_clear_all functions.
+#                   - New nano_version_number function (try to get node vendor version number)
+#                   - With nano_version_number we can now introduce version compatibility with RPC, e.g.
+#                       only set certain RPC options if the node version supports it.
+#                   - Check if NODEHOST can be contacted on sourcing this script. Give a nice message if not.
+#                   - Set an environment variable on sourcing this script that indicates 
+#                       if we are on the BETA network, PROD network or OTHER network
+#                   - remote_block_count available for BETA network (meltingice only for now)
+#                   - Set use_peers to true by default in generate_work (can be overridden by an optional function parameter)
 #          - Bugfix
 #                   - Clean up remote_block_count error logging
 #          - Refactor
@@ -78,6 +83,11 @@ ONE_MNANO="1000000000000000000000000000000"
 
 # Expects values of either: PROD,BETA,OTHER
 NANO_NETWORK_TYPE=
+
+# Expects decimal value in form of MAJOR.MINOR. Impacts some RPC command parameters (e.g. work_generate)
+NANO_NODE_VERSION=
+
+NANO_NODE_VERSION_UNKNOWN=99.99
 
 PROD_BURN_TX_HASH=ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113
 BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23
@@ -232,6 +242,28 @@ is_local_and_remote_block_counts_similar() {
 
 nano_version() {
   curl -g -d '{ "action": "version" }' "${NODEHOST}"
+}
+
+nano_version_number() {
+  local RET=$(nano_version | grep node_vendor | cut -d'"' -f4 2>/dev/null)
+  local FULL_VERSION_STRING=
+  local MAJOR_VERSION=
+  local MINOR_VERSION=
+  if [[ -n "${RET}" ]]; then
+    FULL_VERSION_STRING=$(echo "${RET}" | grep -oP '[0-9\.]+')
+    if [[ "${FULL_VERSION_STRING}" == *\.* ]]; then
+      MAJOR_VERSION=$(echo "${FULL_VERSION_STRING}" | cut -d'.' -f1)
+      MINOR_VERSION=$( (echo "${FULL_VERSION_STRING}" | cut -d'.' -f2) && (echo "${FULL_VERSION_STRING}" | cut -d'.' -f3) ) # just incase an extra decimal appears
+    else
+      MAJOR_VERSION="${FULL_VERSION_STRING}"
+      MINOR_VERSION=0
+    fi
+  else
+    debug "Unable to determine nano node version, empty response from nano_version RPC"
+    echo "${NANO_NODE_VERSION_UNKNOWN}" && return 1
+  fi
+  debug "node_vendor: ${RET}. Version string: ${FULL_VERSION_STRING}. Major: ${MAJOR_VERSION}. Minor: ${MINOR_VERSION}"
+  echo "${MAJOR_VERSION}.${MINOR_VERSION}"
 }
 
 nano_statistics() {
@@ -489,7 +521,12 @@ query_deterministic_keys() {
 generate_work() {
   local FRONTIER=${1:-}
   [[ -z "${FRONTIER}" ]] && echo Need a frontier && return 1
-  local RET=$(curl -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" }' "${NODEHOST}" | grep work| cut -d'"' -f4)
+  local TRY_TO_USE_WORK_PEERS=${2:-1}  #on by default, can be disabled by passing '0' to this function
+  local USE_PEERS=
+  if [[ $(is_version_equal_or_greater 14 0) == "true" && 1 -eq ${TRY_TO_USE_WORK_PEERS} ]]; then
+    USE_PEERS=", \"use_peers\": \"true\""
+  fi
+  local RET=$(curl -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' }' "${NODEHOST}" | grep work| cut -d'"' -f4)
   echo $RET
 }
 
@@ -505,6 +542,34 @@ broadcast_block() {
   echo $HASH
 }
 
+work_peer_list() {
+  local RET=$(curl -g -d '{ "action": "work_peers" }' "${NODEHOST}")
+  echo $RET
+}
+
+work_peer_add() {
+  local ADDRESS="${1:-}"
+  local PORT=${2:-}
+
+  [[ $# -ne 2 ]] && error "Invalid parameters
+    expected: ADDRESS PORT" && return 9
+  [[ "false" == $(is_integer "${PORT}") ]] && error "Port must be an integer." && return 2
+
+  local RET=$(curl -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'", }' "${NODEHOST}")
+  [[ $(echo "${RET}" | grep -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}" && return 1
+
+  echo success
+  return 0
+}
+
+work_peer_clear_all() {
+  local RET=$(curl -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
+  [[ $(echo "${RET}" | grep -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}" && return 1
+
+  echo success
+  return 0
+
+}
 #######################################
 # Convenience functions
 #######################################
@@ -537,10 +602,11 @@ raw_to_mnano() {
 # However, we will make this function return C style exit codes
 # E.g. 1 means error (not an integer) 
 #      0 means success (is an integer)
+# Also add textual booleans for convenience
 is_integer() {
   local INPUT="${1:-}"
-  [[ -n ${INPUT//[0-9]/} ]] && return 1
-  return 0
+  [[ -n ${INPUT//[0-9]/} ]] && echo "false" && return 1
+  echo "true" && return 0
 }
 
 update_nano_functions() {
@@ -579,6 +645,40 @@ update_nano_functions() {
 get_nano_functions_md5sum() {
   local NANO_FUNCTIONS_HASH=$(grep -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | md5sum)
   echo "${NANO_FUNCTIONS_HASH:0:32}"
+}
+
+get_nano_version_major() {
+  echo "${NANO_NODE_VERSION}" | cut -d'.' -f1
+}
+
+get_nano_version_minor() {
+  local RET=$(echo "${NANO_NODE_VERSION}" | cut -d'.' -f2)
+  [[ -z "${RET}" ]] && echo 0
+  echo "${RET}"
+}
+
+# C style return values suck and always confuse me when making shell scripts
+# However, we will make this function return C style exit codes
+# E.g. 1 means error (not an integer) 
+#      0 means success (is an integer)
+# Also add textual booleans for convenience
+is_version_equal_or_greater() {
+  local MAJOR="${1:-}"
+  local MINOR="${2:-}"
+
+  local OUR_MAJOR=$(get_nano_version_major)
+  local OUR_MINOR=$(get_nano_version_minor)
+
+  if [[ ${OUR_MAJOR} -gt ${MAJOR} ]]; then
+    echo true
+    return 0
+  elif [[ ${OUR_MAJOR} -eq ${MAJOR} && ${OUR_MINOR} -ge ${MINOR} ]]; then
+    echo true
+    return 0
+  else
+    echo false
+    return 1
+  fi
 }
 
 #######################################
@@ -653,7 +753,7 @@ generate_spam_and_broadcast() {
   [[ $# -ne 3 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
 
-  [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
+  [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$(mktemp --tmpdir block_store_temp.XXXXX)
 
   generate_spam_sends_to_file $@
@@ -672,7 +772,7 @@ generate_spam_sends_to_file() {
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
 
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
-  [[ -z "${BLOCKS_TO_CREATE}" || 0 -ne $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
+  [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
 
   [[ -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} exists. This file should be empty before generating new blocks." && return 4
 
@@ -703,7 +803,7 @@ __generate_spam_send_to_file() {
       debug "Storing hash in ${BLOCK_STORE}.hash."
       echo "${BLOCK_HASH}" >> "${BLOCK_STORE}.hash"
       CURRENT_BALANCE=$(echo "${BLOCK}" | grep -oP '\\"balance\\"\:\s{0,}\\"[0-9]+' | cut -d'"' -f4)
-      [[ 0 -ne $(is_integer ${CURRENT_BALANCE}) ]] && error "Unable to determine value in block just generated. Aborting..." && return 2
+      [[ "false" == $(is_integer ${CURRENT_BALANCE}) ]] && error "Unable to determine value in block just generated. Aborting..." && return 2
       debug "Holding balance value from block just generated as: ${CURRENT_BALANCE}"
     else
       error "Invalid block hash when creating send block. Got ${BLOCK_HASH:-EMPTY_HASH} Aborting..."
@@ -965,6 +1065,11 @@ check_dependencies
 
 print_warning
 [[ -z "${NANO_NETWORK_TYPE:-}" ]] && NANO_NETWORK_TYPE=$(determine_network)
-[[ "${NANO_NETWORK_TYPE}" == "OTHER" ]] && error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
+if [[ "${NANO_NETWORK_TYPE}" == "OTHER" ]]; then
+  error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
+else
+  [[ -z "${NANO_NODE_VERSION:-}" ]] && NANO_NODE_VERSION=$(nano_version_number)
+  [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
+fi
 
-NANO_FUNCTIONS_HASH=f6720b847fd994f1fc864ec1b4e06f82
+NANO_FUNCTIONS_HASH=13eaea82366c8d2b008a661d592d7cbc
