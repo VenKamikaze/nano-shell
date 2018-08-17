@@ -771,7 +771,7 @@ generate_spam_and_broadcast() {
   local RET=$?
   [[ -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)" ]] && rm -f "${BLOCK_STORE}.$(date +%F.%H.%M.%S)"
   [[ -f "${BLOCK_STORE}" ]] && rm -f "${BLOCK_STORE}"
-  return $?
+  return $RET
 }
 
 # This function generates BLOCKS_TO_CREATE blocks, and writes them to file BLOCK_STORE
@@ -1090,4 +1090,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=5efcad5003737ad26107830e3b183fe3
+NANO_FUNCTIONS_HASH=c27ac57f47d54b987800ddd621eae7d2
