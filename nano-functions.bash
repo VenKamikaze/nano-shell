@@ -558,7 +558,7 @@ work_peer_add() {
     expected: ADDRESS PORT" && return 9
   [[ "false" == $(is_integer "${PORT}") ]] && error "Port must be an integer." && return 2
 
-  local RET=$(curl -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'", }' "${NODEHOST}")
+  local RET=$(curl -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}")
   [[ $(echo "${RET}" | grep -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}" && return 1
 
   echo success
@@ -1082,4 +1082,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=5e5274f4603fddf03afa3de83feed03d
+NANO_FUNCTIONS_HASH=a4bf4bef03365e9828ddca4377fdfaee
