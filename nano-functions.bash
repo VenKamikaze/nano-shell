@@ -13,6 +13,7 @@ NANO_FUNCTIONS_VERSION=0.9301
 # Version: 0.9301
 #          - Bugfix
 #                   - Fix resuming block generation when using generate_spam_sends_to_file, balance was wrong.
+#                   - Fix is_local_and_remote_block_counts_similar - get 'count' from block_count
 #
 # Version: 0.93 (never released to 'master' branch)
 #          - Feature
@@ -235,8 +236,8 @@ remote_block_count() {
 is_local_and_remote_block_counts_similar() {
   local WITHIN_AMOUNT=${1:-15}
   
-  local REMOTE_COUNT=$(remote_block_count)
-  local LOCAL_COUNT=$(block_count)
+  local REMOTE_COUNT=$(remote_block_count | grep count | cut -d'"' -f4)
+  local LOCAL_COUNT=$(block_count | grep count | cut -d'"' -f4)
 
   local LOCAL_LOWER=$(echo "${LOCAL_COUNT} - ${WITHIN_AMOUNT}" | bc)
   local LOCAL_UPPER=$(echo "${LOCAL_COUNT} + ${WITHIN_AMOUNT}" | bc)
@@ -1089,4 +1090,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=09d58a7a8ac9752c4b635bc5f6b94db1
+NANO_FUNCTIONS_HASH=5efcad5003737ad26107830e3b183fe3
