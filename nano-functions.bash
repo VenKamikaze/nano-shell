@@ -17,6 +17,11 @@ NANO_FUNCTIONS_VERSION=0.94
 #          - Bugfix
 #                   - Fix up hidden exit code from cURL command in broadcast_block and some other functions due to 'local'
 #                   - Clearly mark variables that should be modified versus those that shouldn't
+#                   - Hide cURL stderr output for cleaner parsing.
+#          - TODO
+#                   - Add simple indicator for send_pre-generated_blocks and generate_spam_sends_to_file 
+#                   - Test open/recv/send block functions again
+#                   - Implement change rep function ??
 #
 # Last Changed By: M. Saunders
 
@@ -1176,4 +1181,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=47c777bb33969cbb6bb8244371e8b69f
+NANO_FUNCTIONS_HASH=8a0621e1ff09e62a94e3a53e6f9657bf
