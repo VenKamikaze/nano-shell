@@ -159,23 +159,23 @@ check_dependencies() {
     return 127
   fi
 
-  BC=$(find_dependency $BC > /dev/null)
+  BC=$(find_dependency $BC)
   [[ $? -eq 1 ]] && echo "bc not found." >&2 && return 1
-  CURL=$(find_dependency $CURL > /dev/null)
+  CURL=$(find_dependency $CURL)
   [[ $? -eq 1 ]] && echo "cURL not found." >&2 && return 2
-  CUT=$(find_dependency $CUT > /dev/null)
+  CUT=$(find_dependency $CUT)
   [[ $? -eq 1 ]] && echo "cut not found." >&2 && return 3
-  GREP=$(find_dependency $GREP > /dev/null)
+  GREP=$(find_dependency $GREP)
   [[ $? -eq 1 ]] && echo "grep not found." >&2 && return 4
-  MKTEMP=$(find_dependency $MKTEMP > /dev/null)
+  MKTEMP=$(find_dependency $MKTEMP)
   [[ $? -eq 1 ]] && echo "mktemp not found." >&2 && return 5
-  MD5SUM=$(find_dependency $MD5SUM > /dev/null)
+  MD5SUM=$(find_dependency $MD5SUM)
   [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
-  SED=$(find_dependency $SED > /dev/null)
+  SED=$(find_dependency $SED)
   [[ $? -eq 1 ]] && echo "sed not found." >&2 && return 7
-  RM=$(find_dependency $RM > /dev/null)
+  RM=$(find_dependency $RM)
   [[ $? -eq 1 ]] && echo "rm not found." >&2 && return 8
-  TAIL=$(find_dependency $TAIL > /dev/null)
+  TAIL=$(find_dependency $TAIL)
   [[ $? -eq 1 ]] && echo "tail not found." >&2 && return 8
   return 0
 }
@@ -1156,4 +1156,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=f1730327cd25e546ac01bdcb2f5eb7e9
+NANO_FUNCTIONS_HASH=5a2ffa6bfdb46c33da0af54d533c19bc
