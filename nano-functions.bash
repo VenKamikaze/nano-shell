@@ -13,6 +13,10 @@ NANO_FUNCTIONS_VERSION=0.94
 # Version: 0.94
 #          - Feature
 #                   - Improve dependency checking
+#                   - Add beta.api.nanowat.ch for remote_block_count
+#          - Bugfix
+#                   - Fix up hidden exit code from cURL command in broadcast_block and some other functions due to 'local'
+#                   - Clearly mark variables that should be modified versus those that shouldn't
 #
 # Last Changed By: M. Saunders
 
@@ -250,7 +254,7 @@ remote_block_count_nanonodeninja() {
 }
 
 remote_block_count_nanomeltingice() {
-  local RET=
+  local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
     RET=$($CURL -m5 -g "https://nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
@@ -263,9 +267,11 @@ remote_block_count_nanomeltingice() {
 }
 
 remote_block_count_nanowatch() {
-  local RET=
+  local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
     RET=$($CURL -m5 -g "https://api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+  elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
+    RET=$($CURL -m5 -g "https://beta.api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   else
     error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanowatch. Cannot determine remote block count."
   fi
@@ -595,6 +601,7 @@ query_deterministic_keys() {
 generate_work() {
   local FRONTIER=${1:-}
   [[ -z "${FRONTIER}" ]] && echo Need a frontier && return 1
+  local RET; local RETVAL
   local TRY_TO_USE_WORK_PEERS=${2:-1}  #on by default, can be disabled by passing '0' to this function
   local USE_PEERS=
   if [[ $(is_version_equal_or_greater 14 0) == "true" && 1 -eq ${TRY_TO_USE_WORK_PEERS} ]]; then
@@ -606,39 +613,52 @@ generate_work() {
 
 broadcast_block() {
   local BLOCK="${1:-}"
+  local RET; local RETVAL
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
   PAYLOAD_JSON=$($MKTEMP --tmpdir payload.XXXXX)
   echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
-  local RET=$($CURL -g -d @${PAYLOAD_JSON} "${NODEHOST}")
+  RET=$($CURL -g -d @${PAYLOAD_JSON} "${NODEHOST}" 2>/dev/null)
+  RETVAL=$?
   DEBUG_BROADCAST=$RET
   [[ ${DEBUG} -eq 0 ]] && $RM -f "${PAYLOAD_JSON}"
-  local HASH=$(echo "${RET}" | $GREP hash | $CUT -d'"' -f4)
-  echo $HASH
+  if [[ 0 -eq $RETVAL ]]; then
+    local HASH=$(echo "${RET}" | $GREP hash | $CUT -d'"' -f4)
+    echo $HASH
+  else
+    error "Non-zero return code ($RETVAL) when using RPC to broadcast block in $PAYLOAD_JSON."
+  fi
+  return $RETVAL
 }
 
 work_peer_list() {
-  local RET=$($CURL -g -d '{ "action": "work_peers" }' "${NODEHOST}")
-  echo $RET
+  local RET; local RETVAL
+  RET=$($CURL -g -d '{ "action": "work_peers" }' "${NODEHOST}")
+  RETVAL=$?
+  echo $RET; return $RETVAL
 }
 
 work_peer_add() {
   local ADDRESS="${1:-}"
   local PORT=${2:-}
+  local RET; local RETVAL
 
   [[ $# -ne 2 ]] && error "Invalid parameters
     expected: ADDRESS PORT" && return 9
   [[ "false" == $(is_integer "${PORT}") ]] && error "Port must be an integer." && return 2
 
-  local RET=$($CURL -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}")
-  [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}" && return 1
+  RET=$($CURL -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}")
+  RETVAL=$?
+  [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}, exit code ($RETVAL)." && return 1
 
   echo success
   return 0
 }
 
 work_peer_clear_all() {
-  local RET=$($CURL -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
-  [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}" && return 1
+  local RET; local RETVAL
+  RET=$($CURL -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
+  RETVAL=$?
+  [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}, exit code ($RETVAL)." && return 1
 
   echo success
   return 0
@@ -1156,4 +1176,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=5a2ffa6bfdb46c33da0af54d533c19bc
+NANO_FUNCTIONS_HASH=47c777bb33969cbb6bb8244371e8b69f
