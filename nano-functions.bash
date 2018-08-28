@@ -16,13 +16,12 @@ NANO_FUNCTIONS_VERSION=0.94
 #                   - Add beta.api.nanowat.ch for remote_block_count
 #                   - Minor performance improvement for broadcast_block (don't write to a file)
 #                   - Improved error handling in send_pre-generated_blocks
-#                   - Add simple indicator (.) for send_pre-generated_blocks and generate_spam_sends_to_file 
+#                   - Add simple counting indicator for send_pre-generated_blocks and generate_spam_sends_to_file 
 #          - Bugfix
 #                   - Fix up hidden exit code from cURL command in broadcast_block and some other functions due to 'local'
 #                   - Clearly mark variables that should be modified versus those that shouldn't
 #                   - Hide cURL stderr output for cleaner parsing.
 #          - TODO
-#                   - Add simple indicator (.) for send_pre-generated_blocks and generate_spam_sends_to_file 
 #                   - Test open/recv/send block functions again
 #                   - Implement change rep function ??
 #
@@ -1218,4 +1217,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=8a0621e1ff09e62a94e3a53e6f9657bf
+NANO_FUNCTIONS_HASH=0b86644beadaca9d65d4c98c0dd79eb4
