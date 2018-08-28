@@ -906,11 +906,12 @@ generate_spam_sends_to_file() {
     __generate_spam_send_to_file $@
     [[ $? -ne 0 ]] && error "Bombing out due to error in generate_spam_send_to_file" && return 1
 
-    $PRINTF "\rCreated %${BLOCKS_TO_CREATE}d blocks" "$((idx+1))"
+    $PRINTF "\rCreated %${#BLOCKS_TO_CREATE}d blocks" "$((idx+1))"
 
     [[ "${PREVIOUS_BLOCK_HASH}" == "${BLOCK_HASH}" ]] && error "VALIDATION FAILED: Previously generated hash matches hash just generated." && return 2
     PREVIOUS_BLOCK_HASH="${BLOCK_HASH}"
   done
+  echo '...done!'
 }
 
 __generate_spam_send_to_file() {
@@ -953,10 +954,10 @@ send_pre-generated_blocks() {
     RET=$?
     [[ $RET -ne 0 || -z "${HASH}" ]] && error "Failed to broadcast block at line number ${LINE_NO}. Aborting run." && RET=2 && break
 
-    $PRINTF "\rSent %10000d blocks" "$((LINE_NO+1))"
+    $PRINTF "\rSent %10d blocks" "$((LINE_NO+1))"
     LINE_NO=$((LINE_NO+1))
   done < "${BLOCK_STORE}"
-  [[ $RET -eq 0 ]] && echo 'done!' || echo 'failed!'
+  [[ $RET -eq 0 ]] && echo '...done!' || echo '...failed!'
 
   if [[ $RET -eq 0 ]]; then
     echo "Broadcast ${LINE_NO} blocks in ${BLOCK_STORE}. Renaming file to ${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
@@ -1217,4 +1218,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=0b86644beadaca9d65d4c98c0dd79eb4
+NANO_FUNCTIONS_HASH=4fe9ae64c09f6ddbd344a02efa1b89df
