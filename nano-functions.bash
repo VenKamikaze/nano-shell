@@ -14,12 +14,15 @@ NANO_FUNCTIONS_VERSION=0.94
 #          - Feature
 #                   - Improve dependency checking
 #                   - Add beta.api.nanowat.ch for remote_block_count
+#                   - Minor performance improvement for broadcast_block (don't write to a file)
+#                   - Improved error handling in send_pre-generated_blocks
+#                   - Add simple indicator (.) for send_pre-generated_blocks and generate_spam_sends_to_file 
 #          - Bugfix
 #                   - Fix up hidden exit code from cURL command in broadcast_block and some other functions due to 'local'
 #                   - Clearly mark variables that should be modified versus those that shouldn't
 #                   - Hide cURL stderr output for cleaner parsing.
 #          - TODO
-#                   - Add simple indicator for send_pre-generated_blocks and generate_spam_sends_to_file 
+#                   - Add simple indicator (.) for send_pre-generated_blocks and generate_spam_sends_to_file 
 #                   - Test open/recv/send block functions again
 #                   - Implement change rep function ??
 #
@@ -95,7 +98,7 @@ NANO_FUNCTIONS_VERSION=0.94
 #          - Initial release and upload to github.
 #
 
-NODEHOST="127.0.0.1:55000"
+NODEHOST="localhost.localdomain:55000"
 DEBUG=${DEBUG:-0}
 SCRIPT_FILENAME="$(basename $(readlink -f ${BASH_SOURCE[0]}))"
 SCRIPT_FILENAME="${SCRIPT_FILENAME%.*}"
@@ -118,6 +121,8 @@ MD5SUM=md5sum
 SED=sed
 RM=rm
 TAIL=tail
+HEAD=head
+PRINTF=printf
 
 # Expects values of either: PROD,BETA,OTHER
 NANO_NETWORK_TYPE=
@@ -185,7 +190,11 @@ check_dependencies() {
   RM=$(find_dependency $RM)
   [[ $? -eq 1 ]] && echo "rm not found." >&2 && return 8
   TAIL=$(find_dependency $TAIL)
-  [[ $? -eq 1 ]] && echo "tail not found." >&2 && return 8
+  [[ $? -eq 1 ]] && echo "tail not found." >&2 && return 9
+  HEAD=$(find_dependency $HEAD)
+  [[ $? -eq 1 ]] && echo "head not found." >&2 && return 10
+  PRINTF=$(find_dependency $PRINTF)
+  [[ $? -eq 1 ]] && echo "printf not found." >&2 && return 11
   return 0
 }
 
@@ -239,18 +248,18 @@ error() {
 
 available_supply() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "available_supply" }' "${NODEHOST}" | $GREP available | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "available_supply" }' "${NODEHOST}" | $GREP available | $CUT -d'"' -f4)
   echo $RET
 }
 
 block_count() {
-  $CURL -g -d '{ "action": "block_count" }' "${NODEHOST}"
+  $CURL -sS -g -d '{ "action": "block_count" }' "${NODEHOST}"
 }
 
 remote_block_count_nanonodeninja() {
   local RET=
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
-    RET=$($CURL -m5 -g "https://nanonode.ninja/api/blockcount" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://nanonode.ninja/api/blockcount" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   else
     error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanonodeninja. Cannot determine remote block count."
   fi
@@ -261,9 +270,9 @@ remote_block_count_nanonodeninja() {
 remote_block_count_nanomeltingice() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
-    RET=$($CURL -m5 -g "https://nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
-    RET=$($CURL -m5 -g "https://beta.nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://beta.nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   else
     error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at meltingice. Cannot determine remote block count."
   fi
@@ -274,9 +283,9 @@ remote_block_count_nanomeltingice() {
 remote_block_count_nanowatch() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
-    RET=$($CURL -m5 -g "https://api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
-    RET=$($CURL -m5 -g "https://beta.api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://beta.api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   else
     error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanowatch. Cannot determine remote block count."
   fi
@@ -320,11 +329,11 @@ is_local_and_remote_block_counts_similar() {
 }
 
 nano_version() {
-  $CURL -g -d '{ "action": "version" }' "${NODEHOST}"
+  $CURL -sS -g -d '{ "action": "version" }' "${NODEHOST}"
 }
 
 nano_version_number() {
-  local RET=$(nano_version | $GREP node_vendor | $CUT -d'"' -f4 2>/dev/null)
+  local RET=$(nano_version 2>/dev/null | $GREP node_vendor | $CUT -d'"' -f4)
   local FULL_VERSION_STRING=
   local MAJOR_VERSION=
   local MINOR_VERSION=
@@ -346,85 +355,85 @@ nano_version_number() {
 }
 
 nano_statistics() {
-  $CURL -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
+  $CURL -sS -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
 }
 
 get_peers() {
-  local RET=$($CURL -g -d '{ "action": "peers" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "peers" }' "${NODEHOST}")
   echo $RET
 }
 
 
 get_account_info() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" )
+  local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" )
   echo $RET
 }
 
 get_frontier_hash_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP frontier | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP frontier | $CUT -d'"' -f4)
   echo $RET
 }
 
 get_balance_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP balance | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP balance | $CUT -d'"' -f4)
   echo $RET
 }
 
 get_account_pending() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP pending | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP pending | $CUT -d'"' -f4)
   echo $RET
 }
 
 get_account_representative() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP representative | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP representative | $CUT -d'"' -f4)
   echo $RET
 }
 
 get_account_public_key() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP key | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP key | $CUT -d'"' -f4)
   echo $RET
 }
 
 wallet_contains() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
-  local RET=$($CURL -g -d '{ "action": "wallet_contains", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "wallet_contains", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4)
   echo $RET
 }
 
 wallet_frontiers() {
   local WALLET=${1:-}
-  local RET=$($CURL -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
+  local RET=$($CURL -sS -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
   echo $RET
 }
 
 wallet_balances() {
   local WALLET=${1:-}
-  local RET=$($CURL -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
+  local RET=$($CURL -sS -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
   echo $RET
 }
 
 pending_exists() {
   local HASH=${1:-}
-  local RET=$($CURL -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4 )
+  local RET=$($CURL -sS -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4 )
   echo $RET
 }
 
 search_pending() {
   local WALLET=${1:-}
-  local RET=$($CURL -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${NODEHOST}" | $GREP started | $CUT -d'"' -f4 )
+  local RET=$($CURL -sS -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${NODEHOST}" | $GREP started | $CUT -d'"' -f4 )
   echo $RET
 }
 
 block_info() {
   local HASH=${1:-}
-  local RET=$($CURL -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -484,7 +493,7 @@ block_info_amount_mnano() {
   local RAW_AMOUNT=$(block_info_amount "${HASH}")
 
   echo $(raw_to_mnano ${RAW_AMOUNT})
-  #local RET=$($CURL -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | $GREP amount | $CUT -d'"' -f4)
+  #local RET=$($CURL -sS -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | $GREP amount | $CUT -d'"' -f4)
 }
 
 #######################################
@@ -494,14 +503,14 @@ block_info_amount_mnano() {
 
 wallet_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
-  local RET=$($CURL -g -d '{ "action": "wallet_create" }' "${NODEHOST}" | $GREP wallet | $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "wallet_create" }' "${NODEHOST}" | $GREP wallet | $CUT -d'"' -f4)
   echo $RET
 }
 
 wallet_export() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
-  $CURL -g -d '{ "action": "wallet_export", "wallet": "'${WALLET}'" }' "${NODEHOST}"
+  $CURL -sS -g -d '{ "action": "wallet_export", "wallet": "'${WALLET}'" }' "${NODEHOST}"
 }
 
 #######################################
@@ -513,7 +522,7 @@ accounts_create() {
   local WALLET=${1:-}
   local COUNT=${2:-0}
   local WORKGEN=${3:-false}
-  local RET=$($CURL -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${NODEHOST}")
   echo $RET
 
 }
@@ -548,7 +557,7 @@ wallet_change_seed_UNSAFE() {
 
   local WALLET=${1:-}
   local SEED=${2:-}
-  local RET=$($CURL -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -563,7 +572,7 @@ wallet_change_seed() {
   local WALLET=${1:-}
   local SEED_FILE=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
-  local RET=$($CURL -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'$(cat "${SEED_FILE}")'" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
+  local RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'$(cat "${SEED_FILE}")'" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
   echo $RET
 }
 
@@ -580,7 +589,7 @@ query_deterministic_keys_UNSAFE() {
   local SEED=${1:-}
   local INDEX=${2:-}
   echo SEED $SEED
-  local RET=$($CURL -g -d '{ "action": "deterministic_key", "seed": "'${SEED}'", "index": "'${INDEX}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "deterministic_key", "seed": "'${SEED}'", "index": "'${INDEX}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -595,7 +604,7 @@ query_deterministic_keys() {
   local SEED_FILE=${1:-}
   local INDEX=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
-  local RET=$($CURL -g -d '{ "action": "deterministic_key", "seed": "'$(cat "${SEED_FILE}")'", "index": "'${INDEX}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "deterministic_key", "seed": "'$(cat "${SEED_FILE}")'", "index": "'${INDEX}'" }' "${NODEHOST}")
   echo $RET
 }
 
@@ -612,7 +621,7 @@ generate_work() {
   if [[ $(is_version_equal_or_greater 14 0) == "true" && 1 -eq ${TRY_TO_USE_WORK_PEERS} ]]; then
     USE_PEERS=", \"use_peers\": \"true\""
   fi
-  local RET=$($CURL -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' }' "${NODEHOST}" | $GREP work| $CUT -d'"' -f4)
+  local RET=$($CURL -sS -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' }' "${NODEHOST}" | $GREP work| $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -620,14 +629,15 @@ broadcast_block() {
   local BLOCK="${1:-}"
   local RET; local RETVAL
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
-  PAYLOAD_JSON=$($MKTEMP --tmpdir payload.XXXXX)
-  echo '{ "action": "process", "block": "'${BLOCK}'" }' > $PAYLOAD_JSON
-  RET=$($CURL -g -d @${PAYLOAD_JSON} "${NODEHOST}" 2>/dev/null)
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "process", "block": "${BLOCK}" }
+JSON
+)
   RETVAL=$?
   DEBUG_BROADCAST=$RET
-  [[ ${DEBUG} -eq 0 ]] && $RM -f "${PAYLOAD_JSON}"
   if [[ 0 -eq $RETVAL ]]; then
     local HASH=$(echo "${RET}" | $GREP hash | $CUT -d'"' -f4)
+    [[ -z "${HASH}" ]] && error "No hash value returned in broadcast_block. Block was probably invalid and failed to publish!" && return 1
     echo $HASH
   else
     error "Non-zero return code ($RETVAL) when using RPC to broadcast block in $PAYLOAD_JSON."
@@ -637,7 +647,7 @@ broadcast_block() {
 
 work_peer_list() {
   local RET; local RETVAL
-  RET=$($CURL -g -d '{ "action": "work_peers" }' "${NODEHOST}")
+  RET=$($CURL -sS -g -d '{ "action": "work_peers" }' "${NODEHOST}")
   RETVAL=$?
   echo $RET; return $RETVAL
 }
@@ -651,7 +661,7 @@ work_peer_add() {
     expected: ADDRESS PORT" && return 9
   [[ "false" == $(is_integer "${PORT}") ]] && error "Port must be an integer." && return 2
 
-  RET=$($CURL -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}")
+  RET=$($CURL -sS -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}")
   RETVAL=$?
   [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}, exit code ($RETVAL)." && return 1
 
@@ -661,7 +671,7 @@ work_peer_add() {
 
 work_peer_clear_all() {
   local RET; local RETVAL
-  RET=$($CURL -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
+  RET=$($CURL -sS -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
   RETVAL=$?
   [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}, exit code ($RETVAL)." && return 1
 
@@ -715,7 +725,7 @@ update_nano_functions() {
   [[ "${TESTING}" == "bleeding" ]] && BRANCH="develop-next" && echo "WARNING: DO NOT USE THIS BRANCH ON THE LIVE NANO NETWORK. TESTING ONLY"
   local SOURCE_URL="https://raw.githubusercontent.com/VenKamikaze/nano-shell/${BRANCH}/nano-functions.bash"
   if [[ -n "${NANO_FUNCTIONS_LOCATION}" && -w "${NANO_FUNCTIONS_LOCATION}" ]]; then
-    $CURL -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
+    $CURL -sS -o "${NANO_FUNCTIONS_LOCATION}.new" "${SOURCE_URL}"
     if [[ $? -eq 0 && -n $($GREP NANO_FUNCTIONS_HASH "${NANO_FUNCTIONS_LOCATION}.new") ]]; then
       local OLD_SCRIPT_HASH="$(get_nano_functions_md5sum)"
       if [[ "${OLD_SCRIPT_HASH}" == "${NANO_FUNCTIONS_HASH}" ]]; then
@@ -873,8 +883,8 @@ generate_spam_sends_to_file() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
 
-  local CURRENT_BALANCE=
-  local PREVIOUS_BLOCK_HASH=
+  local CURRENT_BALANCE
+  local PREVIOUS_BLOCK_HASH
   if [[ -f "${BLOCK_STORE}" ]]; then
     if [[ -f "${BLOCK_STORE}.hash" ]]; then
       echo "File ${BLOCK_STORE} exists, and associated hash file exists. Getting last block hash, will continue generating from that point."
@@ -887,6 +897,9 @@ generate_spam_sends_to_file() {
     fi
   fi
 
+  local MESSAGE="Generating blocks: "
+  echo "${MESSAGE}"
+
   for ((idx=0; idx < ${BLOCKS_TO_CREATE}; idx++)); do
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
@@ -894,18 +907,20 @@ generate_spam_sends_to_file() {
     __generate_spam_send_to_file $@
     [[ $? -ne 0 ]] && error "Bombing out due to error in generate_spam_send_to_file" && return 1
 
+    $PRINTF "\rCreated %${BLOCKS_TO_CREATE}d blocks" "$((idx+1))"
+
     [[ "${PREVIOUS_BLOCK_HASH}" == "${BLOCK_HASH}" ]] && error "VALIDATION FAILED: Previously generated hash matches hash just generated." && return 2
     PREVIOUS_BLOCK_HASH="${BLOCK_HASH}"
   done
 }
 
 __generate_spam_send_to_file() {
-  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
+  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
 
   if [[ $# -eq 3 ]]; then
     
     # Send one RAW
-    __create_send_block_privkey $@ 1
+    __create_send_block_privkey $@ 1 >/dev/null
     if [[ ${#BLOCK_HASH} -eq 64 ]]; then
       debug "Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
       echo "${BLOCK}" >> "${BLOCK_STORE}"
@@ -928,15 +943,37 @@ __generate_spam_send_to_file() {
 
 # This function broadcasts all blocks contained within file BLOCK_STORE
 send_pre-generated_blocks() {
-  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method."
+  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 1
+  [[ ! -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} did not exist. Did you run 'generate_spam_sends_to_file'?" && return 1
+
+  local RET; local HASH; let LINE_NO=0
+  echo "Beginning broadcast of all pre-generated blocks in ${BLOCK_STORE}: "
 
   while read -r line; do
-    broadcast_block "${line}"
-  done < "${BLOCK_STORE}"
+    HASH=$(broadcast_block "${line}")
+    RET=$?
+    [[ $RET -ne 0 || -z "${HASH}" ]] && error "Failed to broadcast block at line number ${LINE_NO}. Aborting run." && RET=2 && break
 
-  debug "Finished broadcasting blocks in ${BLOCK_STORE}. Renaming file to ${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
-  mv "${BLOCK_STORE}" "${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
-  [[ -f "${BLOCK_STORE}.hash" ]] && mv "${BLOCK_STORE}.hash" "${BLOCK_STORE}.hash.$(date +%F.%H.%M.%S).sent"
+    $PRINTF "\rSent %10000d blocks" "$((LINE_NO+1))"
+    LINE_NO=$((LINE_NO+1))
+  done < "${BLOCK_STORE}"
+  [[ $RET -eq 0 ]] && echo 'done!' || echo 'failed!'
+
+  if [[ $RET -eq 0 ]]; then
+    echo "Broadcast ${LINE_NO} blocks in ${BLOCK_STORE}. Renaming file to ${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
+    debug "Broadcast ${LINE_NO} blocks in ${BLOCK_STORE}. Renaming file to ${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
+    mv "${BLOCK_STORE}" "${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
+    [[ -f "${BLOCK_STORE}.hash" ]] && mv "${BLOCK_STORE}.hash" "${BLOCK_STORE}.hash.$(date +%F.%H.%M.%S).sent"
+  elif [[ $LINE_NO -gt 0 ]]; then
+    error "PARTIAL BROADCAST of ${LINE_NO} blocks in ${BLOCK_STORE}. Successfully broadcast blocks will be moved to ${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
+    $HEAD -n${LINE_NO} "${BLOCK_STORE}" >> "${BLOCK_STORE}.$(date +%F.%H.%M.%S).sent"
+    [[ -f "${BLOCK_STORE}.hash" ]] && $HEAD -n${LINE_NO} "${BLOCK_STORE}.hash" >> "${BLOCK_STORE}.hash.$(date +%F.%H.%M.%S).sent"
+    $SED -e "1,${LINE_NO}d" -i "${BLOCK_STORE}"
+    $SED -e "1,${LINE_NO}d" -i "${BLOCK_STORE}.hash"
+  else
+    error "FAILED to broadcast any blocks from ${BLOCK_STORE}. No files modified."
+  fi
+  return $RET
 }
 
 #######################################
@@ -965,7 +1002,7 @@ __open_block_privkey() {
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE"
-  local RET=$($CURL -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -1012,7 +1049,7 @@ __open_block_wallet() {
   debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to open account $ACCOUNT with state block by receiving block $SOURCE"
-  local RET=$($CURL -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -1072,7 +1109,7 @@ __create_send_block_privkey() {
   debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
 
-  local RET=$($CURL -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}" 2>/dev/null)
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -1131,7 +1168,7 @@ __create_receive_block_privkey() {
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to generate state receive block for $DESTACCOUNT by receiving block $SOURCE"
-  local RET=$($CURL -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -1163,7 +1200,7 @@ __create_receive_block_privkey() {
 }
 
 stop_node() {
-  local RET=$($CURL -g -d '{ "action": "stop" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
+  local RET=$($CURL -sS -g -d '{ "action": "stop" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
   echo $RET
 }
 
