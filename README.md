@@ -7,12 +7,14 @@ I cannot be held responsible for any loss of funds resulting in the use of this 
 ## Basic Usage
 
 Download the script:
-wget https://github.com/VenKamikaze/nano-shell/blob/master/nano-functions.bash
+wget  https://raw.githubusercontent.com/VenKamikaze/nano-shell/master/nano-functions.bash
 
 Source it into your shell:
 source ./nano-functions.bash
 
 And start using it!
+
+Note: if you have trouble reaching your node RPC, make sure you have the RPC enabled in your Node's config.json file. Then make sure that the NODEHOST variable in 'nano-functions.bash' is pointing at the RPC address and port.
 
 ## Compatibility
 
