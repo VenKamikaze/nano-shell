@@ -17,13 +17,17 @@ NANO_FUNCTIONS_VERSION=0.94
 #                   - Minor performance improvement for broadcast_block (don't write to a file)
 #                   - Improved error handling in send_pre-generated_blocks
 #                   - Add simple counting indicator for send_pre-generated_blocks and generate_spam_sends_to_file 
+#                   - Add changerep block creation and send functions
 #          - Bugfix
 #                   - Fix up hidden exit code from cURL command in broadcast_block and some other functions due to 'local'
 #                   - Clearly mark variables that should be modified versus those that shouldn't
 #                   - Hide cURL stderr output for cleaner parsing.
+#          - Refactor
+#                   - Change internal create open block functions to not automatically broadcast the block
+#                   - Check return values for internal state block creation functions
 #          - TODO
 #                   - Test open/recv/send block functions again
-#                   - Implement change rep function ??
+#                   - Test change rep function 
 #
 # Last Changed By: M. Saunders
 
@@ -107,6 +111,7 @@ NANO_FUNCTIONS_LOCATION=$(readlink -f ${BASH_SOURCE[0]})
 
 ZEROES="0000000000000000000000000000000000000000000000000000000000000000"
 ONE_MNANO="1000000000000000000000000000000"
+BURN_ADDRESS="xrb_1111111111111111111111111111111111111111111111111111hifc8npp"
 
 # Binary dependencies required. Assumed to be on $PATH but will
 #  try a few other locations and set the var appropriately if needed.
@@ -795,24 +800,32 @@ is_version_equal_or_greater() {
 
 #Wrapper that calls the appropriate internal __open_block methods based on parameters passed in
 open_block() {
+  local NEWBLOCK; local RET=255
   if [[ $# -eq 4 ]]; then
-    __open_block_privkey $@
+    NEWBLOCK=$(__open_block_privkey $@)
+    RET=$?
   elif [[ $# -eq 5 ]]; then
-    __open_block_wallet $@
+    NEWBLOCK=$(_open_block_wallet $@)
+    RET=$?
   else
     error "Invalid parameters
     expected: PRIVKEY SOURCE DESTACCOUNT REPRESENTATIVE
           or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT REPRESENTATIVE"
     return 9
   fi
+
+  if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
+    broadcast_block "${NEWBLOCK}"
+  fi
 }
 
 #Wrapper that calls the appropriate internal __create_send_block_.* methods based on parameters passed in
 send_block() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  local NEWBLOCK; local RET=255
   if [[ $# -eq 4 ]]; then
-    local NEWBLOCK=$(__create_send_block_privkey $@)
-    broadcast_block "${NEWBLOCK}"
+    NEWBLOCK=$(__create_send_block_privkey $@)
+    RET=$?
   elif [[ $# -eq 5 ]]; then
     error "NOT YET IMPLEMENTED"
     return 10
@@ -823,13 +836,18 @@ send_block() {
           or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT BALANCE_IN_MNANO"
     return 9
   fi
+
+  if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
+    broadcast_block "${NEWBLOCK}"
+  fi
 }
 
 #Wrapper that calls the appropriate internal __create_receive_block.* methods based on parameters passed in
 receive_block() {
+  local NEWBLOCK; local RET=255
   if [[ $# -eq 3 ]]; then
-    local NEWBLOCK=$(__create_receive_block_privkey $@)
-    broadcast_block "${NEWBLOCK}"
+    NEWBLOCK=$(__create_receive_block_privkey $@)
+    RET=$?
   elif [[ $# -eq 4 ]]; then
     error "NOT YET IMPLEMENTED"
     return 10
@@ -840,8 +858,32 @@ receive_block() {
           or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT"
     return 9
   fi
+
+  if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
+    broadcast_block "${NEWBLOCK}"
+  fi
 }
 
+#Wrapper that calls the appropriate internal __create_changerep_block.* methods based on parameters passed in
+changerep_block() {
+  local NEWBLOCK; local RET=255
+  if [[ $# -eq 3 ]]; then
+    NEWBLOCK=$(__create_changerep_block_privkey $@)
+    RET=$?
+  elif [[ $# -eq 4 ]]; then
+    error "NOT YET IMPLEMENTED"
+    return 10
+    #__create_receive_block_wallet $@
+  else
+    error "Invalid parameters
+    expected: PRIVKEY SOURCE DESTACCOUNT 
+          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT"
+    return 9
+  fi
+  if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
+    broadcast_block "${NEWBLOCK}"
+  fi
+}
 
 #######################################
 # Stress-test functions
@@ -1022,10 +1064,15 @@ __open_block_privkey() {
     return 3
   fi
 
+  BLOCK_HASH=$(echo "${RET}" | $GREP hash | $GREP -oP ':(.*)' | $CUT -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
   local TEMPV=$(echo "${RET}" | $GREP block | $GREP -oP ':(.*)')
-  local BLOCK=$(strip_block "${TEMPV}")
+  BLOCK=$(strip_block "${TEMPV}")
   echo "$BLOCK"
-  broadcast_block "${BLOCK}"
 }
 
 # Expects WALLET and ACCOUNT params (did not work for me)
@@ -1069,10 +1116,15 @@ __open_block_wallet() {
     return 3
   fi
 
+  BLOCK_HASH=$(echo "${RET}" | $GREP hash | $GREP -oP ':(.*)' | $CUT -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
   local TEMPV=$(echo "${RET}" | $GREP block | $GREP -oP ':(.*)')
-  local BLOCK=$(strip_block "${TEMPV}")
+  BLOCK=$(strip_block "${TEMPV}")
   echo "$BLOCK"
-  broadcast_block "${BLOCK}"
 }
 
 __create_send_block_privkey() {
@@ -1199,6 +1251,63 @@ __create_receive_block_privkey() {
   echo "$BLOCK"
 }
 
+__create_changerep_block_privkey() {
+  local PRIVKEY=${1:-}
+  local SRCACCOUNT=${2:-}
+  local REPRESENTATIVE=${3:-}
+  local IGNORE_BLOCK_COUNT_CHECK=${IGNORE_BLOCK_COUNT_CHECK:-0}
+
+  if [[ $IGNORE_BLOCK_COUNT_CHECK -eq 0 ]]; then
+    [[ $(is_local_and_remote_block_counts_similar) -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
+  fi  
+
+  local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
+  [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account changing representative had no previous block, or previous block hash is invalid." && return 5
+
+  local CURRENT_BALANCE=${CURRENT_BALANCE:-$(get_balance_from_account ${SRCACCOUNT})}
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null." && return 4
+  fi  
+
+  [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: New representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+
+  local OLD_REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
+  [[ "${REPRESENTATIVE}" == "${OLD_REPRESENTATIVE}" ]] && error "VALIDATION FAILED: New and old representative are identical. Ignoring creation of block." && return 12
+
+  debug "Changing representative for ${SRCACCOUNT} to ${REPRESENTATIVE} | Existing balance: ${CURRENT_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
+
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}" 2>/dev/null)
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug "$RET"
+  debug "------------------"
+  DEBUG_FULL_RESPONSE="$RET"
+
+  if [[ "${RET}" != *"\"link_as_account\\\": \\\"${BURN_ADDRESS}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain burn address in link_as_account field: ${BURN_ADDRESS}"
+    return 1
+  fi
+  if [[ "${RET}" != *"\"balance\\\": \\\"${CURRENT_BALANCE}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain correct balance after creating block. Should have shown balance: ${CURRENT_BALANCE}"
+    return 2
+  fi
+  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain new representative: ${REPRESENTATIVE}"
+    return 3
+  fi
+
+  BLOCK_HASH=$(echo "${RET}" | $GREP hash | $GREP -oP ':(.*)' | $CUT -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
+  local TEMPV=$(echo "${RET}" | $GREP block | $GREP -oP ':(.*)')
+  BLOCK=$(strip_block "${TEMPV}")
+  echo "$BLOCK"
+}
+
 stop_node() {
   local RET=$($CURL -sS -g -d '{ "action": "stop" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
   echo $RET
@@ -1218,4 +1327,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=4fe9ae64c09f6ddbd344a02efa1b89df
+NANO_FUNCTIONS_HASH=06c0c90f59608bcdf3753383695560f7
