@@ -21,13 +21,14 @@ NANO_FUNCTIONS_VERSION=0.94
 #          - Bugfix
 #                   - Fix up hidden exit code from cURL command in broadcast_block and some other functions due to 'local'
 #                   - Clearly mark variables that should be modified versus those that shouldn't
-#                   - Hide cURL stderr output for cleaner parsing.
+#                   - Hide cURL stderr output for cleaner parsing
+#                   - Exclude NODEHOST and DEBUG from hash checking function
+#                   - Change 'meltingice' to 'nanocrawler' in remote block count
 #          - Refactor
 #                   - Change internal create open block functions to not automatically broadcast the block
 #                   - Check return values for internal state block creation functions
 #          - TODO
 #                   - Test open/recv/send block functions again
-#                   - Test change rep function 
 #
 # Last Changed By: M. Saunders
 
@@ -101,8 +102,13 @@ NANO_FUNCTIONS_VERSION=0.94
 #          - Initial release and upload to github.
 #
 
+# You can modify these two variables safely, and without affecting automatic updates of this script
+
 NODEHOST="localhost.localdomain:55000"
 DEBUG=${DEBUG:-0}
+
+# Do not modify the following unless you know what you are doing.
+
 SCRIPT_FILENAME="$(basename $(readlink -f ${BASH_SOURCE[0]}))"
 SCRIPT_FILENAME="${SCRIPT_FILENAME%.*}"
 DEBUGLOG="${DEBUGLOG:-$(dirname $(readlink -f ${BASH_SOURCE[0]}))/${SCRIPT_FILENAME}.log}"
@@ -271,17 +277,22 @@ remote_block_count_nanonodeninja() {
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
-remote_block_count_nanomeltingice() {
+remote_block_count_nanocrawler() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
-    RET=$($CURL -sS -m5 -g "https://nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://api.nanocrawler.cc/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
-    RET=$($CURL -sS -m5 -g "https://beta.nano-api.meltingice.net/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://beta.api.nanocrawler.cc/block_count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   else
     error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at meltingice. Cannot determine remote block count."
   fi
 
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
+}
+
+# DEPRECATED - old site name will be kept short-term for backwards compatibility
+remote_block_count_nanomeltingice() {
+  remote_block_count_nanocrawler
 }
 
 remote_block_count_nanowatch() {
@@ -303,7 +314,7 @@ remote_block_count() {
   [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   local COUNT2=$(remote_block_count_nanowatch 2>/dev/null)
   [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT3=$(remote_block_count_nanomeltingice 2>/dev/null)
+  local COUNT3=$(remote_block_count_nanocrawler 2>/dev/null)
   [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   
   if [[ 0 -eq $GOT_RESULTS ]]; then
@@ -756,7 +767,7 @@ update_nano_functions() {
 }
 
 get_nano_functions_md5sum() {
-  local NANO_FUNCTIONS_HASH=$($GREP -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | md5sum)
+  local NANO_FUNCTIONS_HASH=$($GREP -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | $GREP -vE '^NODEHOST=.*$' | $GREP -vE '^DEBUG=.*$' | md5sum)
   echo "${NANO_FUNCTIONS_HASH:0:32}"
 }
 
@@ -798,14 +809,14 @@ is_version_equal_or_greater() {
 # Wrapper functions
 #######################################
 
-#Wrapper that calls the appropriate internal __open_block methods based on parameters passed in
+#Wrapper that calls the appropriate internal __create_open_block_.* methods based on parameters passed in
 open_block() {
   local NEWBLOCK; local RET=255
   if [[ $# -eq 4 ]]; then
-    NEWBLOCK=$(__open_block_privkey $@)
+    NEWBLOCK=$(__create_open_block_privkey $@)
     RET=$?
   elif [[ $# -eq 5 ]]; then
-    NEWBLOCK=$(_open_block_wallet $@)
+    NEWBLOCK=$(__create_open_block_wallet $@)
     RET=$?
   else
     error "Invalid parameters
@@ -876,8 +887,8 @@ changerep_block() {
     #__create_receive_block_wallet $@
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE DESTACCOUNT 
-          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT"
+    expected: PRIVKEY SOURCE REPRESENTATIVE 
+          or: WALLETUUID ACCOUNT SOURCE REPRESENTATIVE"
     return 9
   fi
   if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
@@ -1022,7 +1033,7 @@ send_pre-generated_blocks() {
 # Block generation functions
 #######################################
 
-__open_block_privkey() {
+__create_open_block_privkey() {
   local PRIVKEY=${1:-}
   local SOURCE=${2:-}
   local DESTACCOUNT=${3:-}
@@ -1076,7 +1087,7 @@ __open_block_privkey() {
 }
 
 # Expects WALLET and ACCOUNT params (did not work for me)
-__open_block_wallet() {
+__create_open_block_wallet() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
   local SOURCE=${3:-}
@@ -1327,4 +1338,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=06c0c90f59608bcdf3753383695560f7
+NANO_FUNCTIONS_HASH=4ac6bdc457dfe5cbb625e473015995a1
