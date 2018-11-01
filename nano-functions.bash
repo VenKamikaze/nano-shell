@@ -28,8 +28,6 @@ NANO_FUNCTIONS_VERSION=0.94
 #          - Refactor
 #                   - Change internal create open block functions to not automatically broadcast the block
 #                   - Check return values for internal state block creation functions
-#          - TODO
-#                   - Test open/recv/send block functions again
 #
 # Last Changed By: M. Saunders
 
@@ -821,8 +819,8 @@ open_block() {
     RET=$?
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE DESTACCOUNT REPRESENTATIVE
-          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT REPRESENTATIVE"
+    expected: PRIVKEY SOURCE_BLOCK_HASH DESTACCOUNT REPRESENTATIVE
+          or: WALLETUUID ACCOUNT SOURCE_BLOCK_HASH DESTACCOUNT REPRESENTATIVE"
     return 9
   fi
 
@@ -866,8 +864,8 @@ receive_block() {
     #__create_receive_block_wallet $@
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE DESTACCOUNT 
-          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT"
+    expected: PRIVKEY SOURCE_BLOCK_HASH DESTACCOUNT 
+          or: WALLETUUID ACCOUNT SOURCE_BLOCK_HASH DESTACCOUNT"
     return 9
   fi
 
@@ -1329,4 +1327,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=5e1356af11d84449d4fb8dd999679a80
+NANO_FUNCTIONS_HASH=cea406bd36b6bd9baf489efd11f1fdc3
