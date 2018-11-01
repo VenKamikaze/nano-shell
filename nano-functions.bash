@@ -24,6 +24,7 @@ NANO_FUNCTIONS_VERSION=0.94
 #                   - Hide cURL stderr output for cleaner parsing
 #                   - Exclude NODEHOST and DEBUG from hash checking function
 #                   - Change 'meltingice' to 'nanocrawler' in remote block count
+#                   - Lighten up some of the scaremongering messages around using this on the production nano network.
 #          - Refactor
 #                   - Change internal create open block functions to not automatically broadcast the block
 #                   - Check return values for internal state block creation functions
@@ -229,8 +230,8 @@ determine_network() {
 }
 
 print_warning() {
-  echo "Please do NOT use this script on the LIVE nano network."
-  echo "It is strictly for testing purposes, and is only for the BETA and TEST nano networks"
+  [[ "${NANO_NETWORK_TYPE}" == "PROD" ]] && echo "Please be cautious using this on the LIVE nano network. I cannot be held responsible for any loss of funds or damages through the use of this script."
+  return 0
 }
 
 # Many of the functions in this script require a special environment variable to be set before they will function
@@ -1143,11 +1144,6 @@ __create_send_block_privkey() {
   local SRCACCOUNT=${2:-}
   local DESTACCOUNT=${3:-}
   local AMOUNT_RAW=${4:-}
-  local IGNORE_BLOCK_COUNT_CHECK=${IGNORE_BLOCK_COUNT_CHECK:-0}
-
-  if [[ $IGNORE_BLOCK_COUNT_CHECK -eq 0 ]]; then
-    [[ $(is_local_and_remote_block_counts_similar) -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
-  fi  
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account sending funds had no previous block, or previous block hash is invalid." && return 5
@@ -1266,11 +1262,6 @@ __create_changerep_block_privkey() {
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
   local REPRESENTATIVE=${3:-}
-  local IGNORE_BLOCK_COUNT_CHECK=${IGNORE_BLOCK_COUNT_CHECK:-0}
-
-  if [[ $IGNORE_BLOCK_COUNT_CHECK -eq 0 ]]; then
-    [[ $(is_local_and_remote_block_counts_similar) -ne 1 ]] && error "VALIDATION FAILED: Local node block count and remote node block counts are out of sync. Please make sure your node is synchronised before using this function." && return 6
-  fi  
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account changing representative had no previous block, or previous block hash is invalid." && return 5
@@ -1329,8 +1320,8 @@ check_dependencies
 
 [[ 1 -eq ${DEBUG} && -w "$(dirname ${DEBUGLOG})" ]] && echo "---- ${NANO_FUNCTIONS_LOCATION} v${NANO_FUNCTIONS_VERSION} sourced: $(date '+%F %H:%M:%S.%3N')" >> "${DEBUGLOG}"
 
-print_warning
 [[ -z "${NANO_NETWORK_TYPE:-}" ]] && NANO_NETWORK_TYPE=$(determine_network)
+print_warning
 if [[ "${NANO_NETWORK_TYPE}" == "OTHER" ]]; then
   error "WARNING: Could not determine what nano network your node is operating on. remote_block_count not available."
 else
@@ -1338,4 +1329,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=4ac6bdc457dfe5cbb625e473015995a1
+NANO_FUNCTIONS_HASH=5e1356af11d84449d4fb8dd999679a80
