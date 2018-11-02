@@ -842,7 +842,7 @@ send_block() {
     #__send_block_wallet $@
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE DESTACCOUNT BALANCE_IN_MNANO
+    expected: PRIVKEY ACCOUNT DESTACCOUNT BALANCE_IN_MNANO
           or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT BALANCE_IN_MNANO"
     return 9
   fi
