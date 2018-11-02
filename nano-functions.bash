@@ -8,8 +8,12 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.94
+NANO_FUNCTIONS_VERSION=0.9401
 
+# Version: 0.9401
+#          - Bugfix
+#                   - Update help text for send_block (thanks https://github.com/Laurentiu-Andronache)
+#
 # Version: 0.94
 #          - Feature
 #                   - Improve dependency checking
@@ -1327,4 +1331,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=b4751757ddd5f451a9df659546eee375
+NANO_FUNCTIONS_HASH=b0e796baadf325ebd6b90d39b565dd3e
