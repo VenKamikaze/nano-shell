@@ -8,12 +8,20 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.9401
+NANO_FUNCTIONS_VERSION=0.95
 
+# Version: 0.95
+#          - Feature
+#                   - API documentation for functions.
+#
 # Version: 0.9401
 #          - Bugfix
 #                   - Update help text for send_block (thanks https://github.com/Laurentiu-Andronache)
 #
+#
+# Last Changed By: M. Saunders
+
+# -------------------------------
 # Version: 0.94
 #          - Feature
 #                   - Improve dependency checking
@@ -33,9 +41,6 @@ NANO_FUNCTIONS_VERSION=0.9401
 #                   - Change internal create open block functions to not automatically broadcast the block
 #                   - Check return values for internal state block creation functions
 #
-# Last Changed By: M. Saunders
-
-# -------------------------------
 # Version: 0.9302
 #          - Bugfix
 #                   - Fix return value from spam function
@@ -136,6 +141,7 @@ RM=rm
 TAIL=tail
 HEAD=head
 PRINTF=printf
+SEQ=seq
 
 # Expects values of either: PROD,BETA,OTHER
 NANO_NETWORK_TYPE=
@@ -208,6 +214,8 @@ check_dependencies() {
   [[ $? -eq 1 ]] && echo "head not found." >&2 && return 10
   PRINTF=$(find_dependency $PRINTF)
   [[ $? -eq 1 ]] && echo "printf not found." >&2 && return 11
+  SEQ=$(find_dependency $SEQ)
+  [[ $? -eq 1 ]] && echo "seq not found." >&2 && return 12
   return 0
 }
 
@@ -253,6 +261,49 @@ debug() {
 error() {
   echo " ! ${FUNCNAME[1]:-#SHELL#}: " >&2
   echo " !! $@" >&2
+}
+
+#######################################
+# Help command
+#######################################
+
+# Desc: Provides help for functions provided by nano-shell.
+# Desc: If you provide no arguments to this function, it will return a summary list of all available functions
+# Desc: Otherwise, you can provide up to two (2) optional arguments.
+# P1o: <all,$function_name>
+# P1Desc: Specify a particular function_name to retrieve detailed help on using that function_name.
+# P1Desc: If nothing is specified, this will default to showing a summary list of all available functions.
+nano_shell_help() {
+  local SEP_H="==========================================================="
+  local SEP_B="-----------------------------------------------------------"
+  local FUNCTIONAL_HELP=${1:-}
+  if [[ -z "${FUNCTIONAL_HELP}" || "all" == "${FUNCTIONAL_HELP}" ]]; then
+    echo "${SEP_H}"
+    echo "The following functions are provided by ${NANO_FUNCTIONS_LOCATION}."
+    cat "${NANO_FUNCTIONS_LOCATION}" | $SED -n "s/^\(.*\)(\\(\\)\\s*).*$/\1/p" | sort
+    echo "${SEP_H}"
+  else
+    debug "Showing detailed help for function named: ${FUNCTIONAL_HELP}"
+    local DETAIL=$($SED -n "/# Desc:/,/${FUNCTIONAL_HELP}\(\)/p" "${NANO_FUNCTIONS_LOCATION}")
+    echo "${SEP_H}"
+    echo "Function Name: ${FUNCTIONAL_HELP}"
+    echo "${SEP_B}"
+    echo -n "Description:"
+    echo "$DETAIL" | $SED -n "s/^#\sDesc:\s*\(.*\)/  \1/p"
+    echo "${SEP_B}"
+    echo "Parameters:"
+    for PARAM_POS in $($SEQ 1 9); do
+      local PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sP${PARAM_POS}o")
+      local PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}[o]*:\s*\(.*\)/  \1/p")
+      [[ -z "${PARAM_VALUES}" ]] && break
+      local PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}Desc:\s*\(.*\)/  \1/p")
+      [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
+      echo " (${PARAM_POS}) valid values: ${PARAM_VALUES} "
+      echo " (${PARAM_POS}) Description: "
+      echo "${PARAM_DESC}"
+    done
+    echo "${SEP_H}"
+  fi
 }
 
 #######################################
