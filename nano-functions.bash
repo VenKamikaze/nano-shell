@@ -142,6 +142,8 @@ TAIL=tail
 HEAD=head
 PRINTF=printf
 SEQ=seq
+SORT=sort
+WC=wc
 
 # Expects values of either: PROD,BETA,OTHER
 NANO_NETWORK_TYPE=
@@ -216,6 +218,10 @@ check_dependencies() {
   [[ $? -eq 1 ]] && echo "printf not found." >&2 && return 11
   SEQ=$(find_dependency $SEQ)
   [[ $? -eq 1 ]] && echo "seq not found." >&2 && return 12
+  SORT=$(find_dependency $SORT)
+  [[ $? -eq 1 ]] && echo "sort not found." >&2 && return 13
+  WC=$(find_dependency $WC)
+  [[ $? -eq 1 ]] && echo "wc not found." >&2 && return 14
   return 0
 }
 
@@ -251,6 +257,7 @@ allow_unsafe_commands() {
   [[ 1 -eq ${NANO_UNSAFE_COMMANDS:-0} ]] && echo 1 || (echo "NANO_UNSAFE_COMMANDS is not set to 1. Ignoring all unsafe commands" >&2 && echo 0)
 }
 
+# Desc: If debug flag is enabled, will output logging and stdout where used.
 debug() {
   if [[ 1 -eq ${DEBUG} && -w "${DEBUGLOG}" ]]; then
     echo -n " ? ${FUNCNAME[1]:-#SHELL#}: " >> "${DEBUGLOG}"
@@ -258,6 +265,9 @@ debug() {
   fi
 }
 
+# Desc: Prints error messages
+# P1m: <Unlimited length string>
+# P1Desc: Pass in any message to print it to stderr, and also print the function caller
 error() {
   echo " ! ${FUNCNAME[1]:-#SHELL#}: " >&2
   echo " !! $@" >&2
@@ -269,7 +279,7 @@ error() {
 
 # Desc: Provides help for functions provided by nano-shell.
 # Desc: If you provide no arguments to this function, it will return a summary list of all available functions
-# Desc: Otherwise, you can provide up to two (2) optional arguments.
+# Desc: Otherwise, you can provide one (1) optional argument.
 # P1o: <all,$function_name>
 # P1Desc: Specify a particular function_name to retrieve detailed help on using that function_name.
 # P1Desc: If nothing is specified, this will default to showing a summary list of all available functions.
@@ -280,30 +290,86 @@ nano_shell_help() {
   if [[ -z "${FUNCTIONAL_HELP}" || "all" == "${FUNCTIONAL_HELP}" ]]; then
     echo "${SEP_H}"
     echo "The following functions are provided by ${NANO_FUNCTIONS_LOCATION}."
-    cat "${NANO_FUNCTIONS_LOCATION}" | $SED -n "s/^\(.*\)(\\(\\)\\s*).*$/\1/p" | sort
+    cat "${NANO_FUNCTIONS_LOCATION}" | $SED -n "s/^\(.*\)(\\(\\)\\s*).*$/\1/p" | $SORT
     echo "${SEP_H}"
   else
     debug "Showing detailed help for function named: ${FUNCTIONAL_HELP}"
-    local DETAIL=$($SED -n "/# Desc:/,/${FUNCTIONAL_HELP}\(\)/p" "${NANO_FUNCTIONS_LOCATION}")
+    local GENERALISED_BEFORE=$($GREP -B30 -E "^(${FUNCTIONAL_HELP})\(\)\s*.*$" "${NANO_FUNCTIONS_LOCATION}")
+    [[ -z "${GENERALISED_BEFORE}" ]] && echo "No function matching ${FUNCTIONAL_HELP} found." && return 1
+    local DETAIL=$(__nano_shell_help_detail "${GENERALISED_BEFORE}")
     echo "${SEP_H}"
     echo "Function Name: ${FUNCTIONAL_HELP}"
     echo "${SEP_B}"
     echo -n "Description:"
     echo "$DETAIL" | $SED -n "s/^#\sDesc:\s*\(.*\)/  \1/p"
     echo "${SEP_B}"
-    echo "Parameters:"
-    for PARAM_POS in $($SEQ 1 9); do
-      local PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sP${PARAM_POS}o")
-      local PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}[o]*:\s*\(.*\)/  \1/p")
-      [[ -z "${PARAM_VALUES}" ]] && break
-      local PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}Desc:\s*\(.*\)/  \1/p")
-      [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
-      echo " (${PARAM_POS}) valid values: ${PARAM_VALUES} "
-      echo " (${PARAM_POS}) Description: "
-      echo "${PARAM_DESC}"
-    done
+    __nano_shell_help_parameters "${DETAIL}"
     echo "${SEP_H}"
   fi
+}
+
+# Desc: (Internal function)
+# Desc: Gets the comments preceeding a function name for parsing by the help
+# Desc:   functions.
+__nano_shell_help_detail() {
+  local NO_HELP_AVAILABLE="# Desc: No help available for this function."
+  local LINES_BEFORE="${1:-}"
+  let LINE_COUNT=$(echo "${LINES_BEFORE}" | $WC -l)-1 # remove the function name line.
+  local ITERATOR=$($SEQ 1 ${LINE_COUNT} | $SORT -rn)
+  echo "$ITERATOR" | while read l; do
+    local CURRLINE=$(trim $(echo "${LINES_BEFORE}" | $SED -n "$l"p ))
+    let NEXTNUM=$l+1
+    local PREVLINE=$(trim $(echo "${LINES_BEFORE}" | $SED -n "$NEXTNUM"p))
+    if [[ "${PREVLINE}" == \#* ]]; then
+      if [[ -z "${CURRLINE}" ]]; then
+        debug "Found end of help section for function. Index is $l out of line count $LINE_COUNT."
+        echo "${LINES_BEFORE}" | $SED -n "${l},${LINE_COUNT}p" 
+        return 0
+      fi
+    fi
+    PREVLINE="${CURRLINE}"
+    [[ $l -eq 1 ]] && return 1
+  done
+  [[ $? -ne 0 ]] && echo "${NO_HELP_AVAILABLE}" && return 1
+  return 0
+}
+
+# Desc: (Internal function)
+# Desc: Provides parsing of help documentation for function parameters
+# Desc:   where function comments match expected format.
+__nano_shell_help_parameters() {
+  local DETAIL="${1:-}"
+  local SEP_B="-----------------------------------------------------------"
+  echo "Parameters:"
+  local PARAM_GROUPS=$(echo "${DETAIL}" | $GREP -oE "^#\sg[0-9]P[0-9]")
+  for PARAM_POS in $($SEQ 1 9); do
+    local PARAM_IS_OPTIONAL
+    local PARAM_VALUES
+    local PARAM_DESC
+    if [[ -n "${PARAM_GROUPS}" ]]; then
+      echo " Group (${PARAM_POS}): "
+      for PARAM_POS2 in $($SEQ 1 9); do
+        PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sg${PARAM_POS}P${PARAM_POS2}o")
+        PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}[o]*:\s*\(.*\)/  \1/p")
+        [[ -z "${PARAM_VALUES}" ]] && break
+        PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}Desc:\s*\(.*\)/  \1/p")
+        [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
+        echo " (${PARAM_POS}) Valid values: ${PARAM_VALUES} "
+        echo " (${PARAM_POS}) Description: "
+        echo "${PARAM_DESC}"
+      done
+      echo "${SEP_B}"
+    else
+       PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sP${PARAM_POS}o")
+       PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}[o]*:\s*\(.*\)/  \1/p")
+    [[ -z "${PARAM_VALUES}" ]] && break
+       PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}Desc:\s*\(.*\)/  \1/p")
+      [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
+      echo " (${PARAM_POS}) Valid values: ${PARAM_VALUES} "
+      echo " (${PARAM_POS}) Description: "
+      echo "${PARAM_DESC}"
+    fi
+  done
 }
 
 #######################################
@@ -756,6 +822,18 @@ unregex() {
   # This is a function because dealing with quotes is a pain.
   # http://stackoverflow.com/a/2705678/120999
   $SED -e 's/[]\/()$*.^|[]/\\&/g' <<< "${1:-}"
+}
+
+# Desc: Simple trim (POSIX compliant)
+# Desc: Thanks to stackoverflow comment: 
+# Desc: https://stackoverflow.com/questions/369758/how-to-trim-whitespace-from-a-bash-variable
+trim() {
+    local var="$*"
+    # remove leading whitespace characters
+    var="${var#"${var%%[![:space:]]*}"}"
+    # remove trailing whitespace characters
+    var="${var%"${var##*[![:space:]]}"}"
+    echo -n "$var"
 }
 
 strip_block() {
@@ -1382,4 +1460,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=b0e796baadf325ebd6b90d39b565dd3e
+NANO_FUNCTIONS_HASH=6394525af53846a218a267ac2672fc2e
