@@ -280,14 +280,14 @@ error() {
 # Desc: Provides help for functions provided by nano-shell.
 # Desc: If you provide no arguments to this function, it will return a summary list of all available functions
 # Desc: Otherwise, you can provide one (1) optional argument.
-# P1o: <all,$function_name>
+# P1o: <list,$function_name>
 # P1Desc: Specify a particular function_name to retrieve detailed help on using that function_name.
 # P1Desc: If nothing is specified, this will default to showing a summary list of all available functions.
 nano_shell_help() {
   local SEP_H="==========================================================="
   local SEP_B="-----------------------------------------------------------"
   local FUNCTIONAL_HELP=${1:-}
-  if [[ -z "${FUNCTIONAL_HELP}" || "all" == "${FUNCTIONAL_HELP}" ]]; then
+  if [[ -z "${FUNCTIONAL_HELP}" || "list" == "${FUNCTIONAL_HELP}" ]]; then
     echo "${SEP_H}"
     echo "The following functions are provided by ${NANO_FUNCTIONS_LOCATION}."
     echo "${SEP_H}"
@@ -304,6 +304,18 @@ nano_shell_help() {
     echo -n "Description:"
     echo "$DETAIL" | $SED -n "s/^#\sDesc:\s*\(.*\)/  \1/p"
     echo "${SEP_B}"
+    local RPCINFO=$(echo "$DETAIL" | $SED -n "s/^#\sRPC:\s*\(.*\)/  \1/p")
+    if [[ -n "${RPCINFO}" ]]; then 
+      echo -n "RPC call(s) used:"
+      echo "${RPCINFO}"
+      echo "${SEP_B}"
+    fi
+    local DEPRECATED=$(echo "$DETAIL" | $SED -n "s/^#\sDEPRECATED:\s*\(.*\)/  \1/p")
+    if [[ -n "${DEPRECATED}" ]]; then 
+      echo -n "DEPRECATED FUNCTION:"
+      echo "${DEPRECATED}"
+      echo "${SEP_B}"
+    fi
     __nano_shell_help_parameters "${DETAIL}"
     echo "${SEP_H}"
   fi
@@ -363,7 +375,7 @@ __nano_shell_help_parameters() {
     else
        PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sP${PARAM_POS}o")
        PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}[o]*:\s*\(.*\)/  \1/p")
-    [[ -z "${PARAM_VALUES}" ]] && break
+      [[ -z "${PARAM_VALUES}" ]] && break
        PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}Desc:\s*\(.*\)/  \1/p")
       [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
       echo " (${PARAM_POS}) Valid values: ${PARAM_VALUES} "
@@ -371,22 +383,31 @@ __nano_shell_help_parameters() {
       echo "${PARAM_DESC}"
     fi
   done
+  [[ 1 -eq ${PARAM_POS} ]] && echo "None" || return 0
 }
 
 #######################################
 # Query commands
 #######################################
 
+# Desc: Show the total circulating supply on the nano network
+# RPC: available_supply
 available_supply() {
-  local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "available_supply" }' "${NODEHOST}" | $GREP available | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Show the checked (valid or processed) and unchecked (invalid or queued) total blocks known to the node
+# RPC: block_count
 block_count() {
   $CURL -sS -g -d '{ "action": "block_count" }' "${NODEHOST}"
 }
 
+# Desc: Query the public API at the given site to retrieve a block count
+# Desc: Note: This call may break if the given site changes the format used
+# Desc: Note:   to display blocks.
+# Desc: Note: Only works with the LIVE (PROD) nano network - no BETA API known.
+# RPC: (non nano-node, remote call to /api/blockcount)
 remote_block_count_nanonodeninja() {
   local RET=
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
@@ -398,6 +419,10 @@ remote_block_count_nanonodeninja() {
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
+# Desc: Query the public API at the given site to retrieve a block count
+# Desc: Note: This call may break if the given site changes the format used
+# Desc: Note:   to display blocks.
+# RPC: (non nano-node, remote call to /block_count)
 remote_block_count_nanocrawler() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
@@ -411,11 +436,19 @@ remote_block_count_nanocrawler() {
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
-# DEPRECATED - old site name will be kept short-term for backwards compatibility
+# Desc: Query the public API at the given site to retrieve a block count
+# Desc: Note: This call may break if the given site changes the format used
+# Desc: Note:   to display blocks.
+# RPC: (non nano-node, remote call to /block_count)
+# DEPRECATED: Use remote_block_count_nanocrawler instead.
 remote_block_count_nanomeltingice() {
   remote_block_count_nanocrawler
 }
 
+# Desc: Query the public API at the given site to retrieve a block count
+# Desc: Note: This call may break if the given site changes the format used
+# Desc: Note:   to display blocks.
+# RPC: (non nano-node, remote call to /blocks/count)
 remote_block_count_nanowatch() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
@@ -429,14 +462,19 @@ remote_block_count_nanowatch() {
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
+# Desc: Query the public APIs at three different sites and averages the result
+# Desc: Sites: Nano Crawler, Nano Node Ninja, Nano Watch
+# Desc: Note: This call may break if the given site(s) change the format used
+# Desc: Note:   to display blocks.
+# RPC: (non nano-node, remote calls to community run block explorers)
 remote_block_count() {
   let GOT_RESULTS=3
-  local COUNT1=$(remote_block_count_nanonodeninja 2>/dev/null)
-  [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT2=$(remote_block_count_nanowatch 2>/dev/null)
-  [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT3=$(remote_block_count_nanocrawler 2>/dev/null)
+  local COUNT1=$(remote_block_count_nanocrawler 2>/dev/null)
   [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
+  local COUNT2=$(remote_block_count_nanonodeninja 2>/dev/null)
+  [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
+  local COUNT3=$(remote_block_count_nanowatch 2>/dev/null)
+  [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   
   if [[ 0 -eq $GOT_RESULTS ]]; then
     error "Unable to retrieve a remote block count from a reliable source. Is your network connection OK?"
@@ -449,11 +487,24 @@ remote_block_count() {
   echo $AVG
 }
 
+# Desc: Query public APIs to obtain average block count
+# Desc: and then compare the result to our local block count.
+# Desc: Sites: Nano Crawler, Nano Node Ninja, Nano Watch
+# Desc: Note: This call may break if the given site(s) change the format used
+# Desc: Note:   to display blocks.
+# P1o: <$within_amount_blocks>
+# P1Desc: Check if local block count from our node is within the number of blocks
+# P1Desc:   specified by this parameter (positive or negative).
+# P1Desc: If no value specified, defaults to 0.01% of remote_block_count average.
+# RPC: (non nano-node, remote calls to community run block explorers)
+# RPC: block_count
 is_local_and_remote_block_counts_similar() {
-  local WITHIN_AMOUNT=${1:-15}
+  local WITHIN_AMOUNT=${1:-}
   
   local REMOTE_COUNT=$(remote_block_count | $GREP count | $CUT -d'"' -f4)
   local LOCAL_COUNT=$(block_count | $GREP count | $CUT -d'"' -f4)
+
+  [[ -z "${WITHIN_AMOUNT}" ]] && WITHIN_AMOUNT=$(echo "scale=0; $REMOTE_COUNT / 10000" | $BC)
 
   local LOCAL_LOWER=$(echo "${LOCAL_COUNT} - ${WITHIN_AMOUNT}" | $BC)
   local LOCAL_UPPER=$(echo "${LOCAL_COUNT} + ${WITHIN_AMOUNT}" | $BC)
@@ -464,10 +515,16 @@ is_local_and_remote_block_counts_similar() {
   echo $IS_WITHIN
 }
 
+# Desc: Query the node version and max compatible protocol version
+# Desc: Returns result directly from node, no parsing/formatting applied.
+# RPC: version
 nano_version() {
   $CURL -sS -g -d '{ "action": "version" }' "${NODEHOST}"
 }
 
+# Desc: Query the node version 
+# Desc: Parses the result to only show version string as Major.Minor
+# RPC: version
 nano_version_number() {
   local RET=$(nano_version 2>/dev/null | $GREP node_vendor | $CUT -d'"' -f4)
   local FULL_VERSION_STRING=
@@ -490,34 +547,58 @@ nano_version_number() {
   echo "${MAJOR_VERSION}.${MINOR_VERSION}"
 }
 
+# Desc: Query the node statistics, type: counters
+# Desc: Returns result directly from node, no parsing/formatting applied.
+# RPC: stats:counters
 nano_statistics() {
   $CURL -sS -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
 }
 
+# Desc: Query the nodes known peers
+# Desc: Returns result directly from node, no parsing/formatting applied.
+# RPC: peers
 get_peers() {
   local RET=$($CURL -sS -g -d '{ "action": "peers" }' "${NODEHOST}")
   echo $RET
 }
 
-
+# Desc: Query the account information for the given nano account
+# Desc: Returns result directly from node, no parsing/formatting applied.
+# RPC: account_info:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
 get_account_info() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" )
   echo $RET
 }
 
+# Desc: Query the frontier hash for the given nano account
+# Desc: (e.g. the head block/the most recent transaction known)
+# RPC: account_info:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
 get_frontier_hash_from_account() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP frontier | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Query the balance for the given nano account
+# Desc: but return only the balance of the account
+# RPC: account_info:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
 get_balance_from_account() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP balance | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Query the pending (unpocketed) blocks for the given nano account
+# RPC: account_info:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
 get_account_pending() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP pending | $CUT -d'"' -f4)
