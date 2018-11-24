@@ -290,7 +290,8 @@ nano_shell_help() {
   if [[ -z "${FUNCTIONAL_HELP}" || "all" == "${FUNCTIONAL_HELP}" ]]; then
     echo "${SEP_H}"
     echo "The following functions are provided by ${NANO_FUNCTIONS_LOCATION}."
-    cat "${NANO_FUNCTIONS_LOCATION}" | $SED -n "s/^\(.*\)(\\(\\)\\s*).*$/\1/p" | $SORT
+    echo "${SEP_H}"
+    cat "${NANO_FUNCTIONS_LOCATION}" | $SED -n "s/^\([a-z0-9_]*\)\(()\s*{\)$/\1/p" | $SORT
     echo "${SEP_H}"
   else
     debug "Showing detailed help for function named: ${FUNCTIONAL_HELP}"
