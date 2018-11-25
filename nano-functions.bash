@@ -763,12 +763,24 @@ block_info_account_balance() {
   fi
 }
 
+# Desc: Determines the balance being transferred in the
+# Desc: given block hash
+# RPC: block:hash
+# P1: <$hash>
+# P1Desc: The block hash to query
+# Returns: Number (block balance in raw)
 block_info_amount() {
   local HASH=${1:-}
   local PREV_HASH=$(block_info_previous_hash "${HASH}")
 
+  local ACCOUNT_BALANCE_PREV
+  if [[ -z "${PREV_HASH}" || "${ZEROES}" == "${PREV_HASH}" ]]; then
+    ACCOUNT_BALANCE_PREV=0
+  else
+    ACCOUNT_BALANCE_PREV=$(block_info_account_balance "${PREV_HASH}")
+  fi
+
   local ACCOUNT_BALANCE_NOW=$(block_info_account_balance "${HASH}")
-  local ACCOUNT_BALANCE_PREV=$(block_info_account_balance "${PREV_HASH}")
 
   local IS_SEND=$(echo "${ACCOUNT_BALANCE_NOW} < ${ACCOUNT_BALANCE_PREV}" | $BC)
   local IS_EQUAL=$(echo "${ACCOUNT_BALANCE_NOW} < ${ACCOUNT_BALANCE_PREV}" | $BC)
@@ -786,6 +798,12 @@ block_info_amount() {
   fi
 }
 
+# Desc: Determines the balance being transferred in the
+# Desc: given block hash
+# RPC: block:hash
+# P1: <$hash>
+# P1Desc: The block hash to query
+# Returns: Number (block balance in MNano)
 block_info_amount_mnano() {
   local HASH=${1:-}
   local RAW_AMOUNT=$(block_info_amount "${HASH}")
@@ -798,13 +816,20 @@ block_info_amount_mnano() {
 # Wallet commands
 #######################################
 
-
+# Desc: Creates a new random wallet
+# RPC: wallet_create
+# Returns: Wallet UUID
 wallet_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local RET=$($CURL -sS -g -d '{ "action": "wallet_create" }' "${NODEHOST}" | $GREP wallet | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Returns a JSON representation of given wallet
+# RPC: wallet_export:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to export
+# Returns: JSON from node RPC
 wallet_export() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
@@ -815,6 +840,18 @@ wallet_export() {
 # Accounts commands
 #######################################
 
+# Desc: Adds given number of new accounts to wallet.
+# Desc: This is generated in a deterministic way based on the 
+# Desc: seed associated with your wallet.
+# RPC: accounts_create:wallet:count:work
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to create the accounts within
+# P2: <$count>
+# P2Desc: The number of new accounts to generate
+# P3o: <$workgen_boolean>
+# P3Desc: Set to true to enable work generation by default after
+# P3Desc: creating accounts. Default is false.
+# Returns: JSON from node RPC
 accounts_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
@@ -822,9 +859,13 @@ accounts_create() {
   local WORKGEN=${3:-false}
   local RET=$($CURL -sS -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${NODEHOST}")
   echo $RET
-
 }
 
+# Desc: Create a single account in given wallet.
+# Desc: Note: enables work generation by default.
+# RPC: accounts_create:wallet:count:work
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to create the account within
 account_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
