@@ -159,7 +159,7 @@ BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA7682
 # Try to find $PROG on our $PATH, otherwise attempt to find
 #   it in a few common places before giving up...
 # Will echo the pathfile of $PROG if found, or empty+non-zero return code
-find_dependency() {
+__find_dependency() {
   local PROG="${1:-}"
   [[ -z "$PROG" ]] && error "You must specify executable file to find"
 
@@ -180,7 +180,7 @@ find_dependency() {
     [[ -x "/usr/bin/which" ]] && debug "Found \'which\' at /usr/bin" && WHICH=/usr/bin/which
     [[ -z "$WHICH" && -x "/bin/which" ]] && debug "Found \'which\' at /bin" && WHICH=/bin/which
     if [[ "${PROG}" != "which" ]]; then
-      find_dependency "${PROG}"
+      __find_dependency "${PROG}"
     fi
   fi
   error "\'${PROG}\' not found"
@@ -188,39 +188,39 @@ find_dependency() {
 }
 
 check_dependencies() {
-  WHICH=$(find_dependency $WHICH)
+  WHICH=$(__find_dependency $WHICH)
   if [[ $? -ne 0 ]]; then
     error "\$PATH does not contain 'which' and we could not find it."
     return 127
   fi
 
-  BC=$(find_dependency $BC)
+  BC=$(__find_dependency $BC)
   [[ $? -eq 1 ]] && echo "bc not found." >&2 && return 1
-  CURL=$(find_dependency $CURL)
+  CURL=$(__find_dependency $CURL)
   [[ $? -eq 1 ]] && echo "cURL not found." >&2 && return 2
-  CUT=$(find_dependency $CUT)
+  CUT=$(__find_dependency $CUT)
   [[ $? -eq 1 ]] && echo "cut not found." >&2 && return 3
-  GREP=$(find_dependency $GREP)
+  GREP=$(__find_dependency $GREP)
   [[ $? -eq 1 ]] && echo "grep not found." >&2 && return 4
-  MKTEMP=$(find_dependency $MKTEMP)
+  MKTEMP=$(__find_dependency $MKTEMP)
   [[ $? -eq 1 ]] && echo "mktemp not found." >&2 && return 5
-  MD5SUM=$(find_dependency $MD5SUM)
+  MD5SUM=$(__find_dependency $MD5SUM)
   [[ $? -eq 1 ]] && echo "md5sum not found." >&2 && return 6
-  SED=$(find_dependency $SED)
+  SED=$(__find_dependency $SED)
   [[ $? -eq 1 ]] && echo "sed not found." >&2 && return 7
-  RM=$(find_dependency $RM)
+  RM=$(__find_dependency $RM)
   [[ $? -eq 1 ]] && echo "rm not found." >&2 && return 8
-  TAIL=$(find_dependency $TAIL)
+  TAIL=$(__find_dependency $TAIL)
   [[ $? -eq 1 ]] && echo "tail not found." >&2 && return 9
-  HEAD=$(find_dependency $HEAD)
+  HEAD=$(__find_dependency $HEAD)
   [[ $? -eq 1 ]] && echo "head not found." >&2 && return 10
-  PRINTF=$(find_dependency $PRINTF)
+  PRINTF=$(__find_dependency $PRINTF)
   [[ $? -eq 1 ]] && echo "printf not found." >&2 && return 11
-  SEQ=$(find_dependency $SEQ)
+  SEQ=$(__find_dependency $SEQ)
   [[ $? -eq 1 ]] && echo "seq not found." >&2 && return 12
-  SORT=$(find_dependency $SORT)
+  SORT=$(__find_dependency $SORT)
   [[ $? -eq 1 ]] && echo "sort not found." >&2 && return 13
-  WC=$(find_dependency $WC)
+  WC=$(__find_dependency $WC)
   [[ $? -eq 1 ]] && echo "wc not found." >&2 && return 14
   return 0
 }
@@ -250,9 +250,9 @@ print_warning() {
   return 0
 }
 
-# Many of the functions in this script require a special environment variable to be set before they will function
-#   This is just a very small safety check to make sure people think about what they are trying to do.
-
+# Desc: Many of the functions in this script require a special environment
+# Desc: variable to be set before they will function.
+# Desc: Outputs '1' if NANO_UNSAFE_COMMANDS environment variable equals 1, otherwise outputs '0'
 allow_unsafe_commands() {
   [[ 1 -eq ${NANO_UNSAFE_COMMANDS:-0} ]] && echo 1 || (echo "NANO_UNSAFE_COMMANDS is not set to 1. Ignoring all unsafe commands" >&2 && echo 0)
 }
@@ -283,6 +283,7 @@ error() {
 # P1o: <list,$function_name>
 # P1Desc: Specify a particular function_name to retrieve detailed help on using that function_name.
 # P1Desc: If nothing is specified, this will default to showing a summary list of all available functions.
+# Returns: Text
 nano_shell_help() {
   local SEP_H="==========================================================="
   local SEP_B="-----------------------------------------------------------"
@@ -314,6 +315,12 @@ nano_shell_help() {
     if [[ -n "${DEPRECATED}" ]]; then 
       echo -n "DEPRECATED FUNCTION:"
       echo "${DEPRECATED}"
+      echo "${SEP_B}"
+    fi
+    local RETURNS=$(echo "$DETAIL" | $SED -n "s/^#\sReturns:\s*\(.*\)/  \1/p")
+    if [[ -n "${RETURNS}" ]]; then 
+      echo -n "Returns:"
+      echo "${RETURNS}"
       echo "${SEP_B}"
     fi
     __nano_shell_help_parameters "${DETAIL}"
@@ -392,6 +399,7 @@ __nano_shell_help_parameters() {
 
 # Desc: Show the total circulating supply on the nano network
 # RPC: available_supply
+# Returns: Number
 available_supply() {
   local RET=$($CURL -sS -g -d '{ "action": "available_supply" }' "${NODEHOST}" | $GREP available | $CUT -d'"' -f4)
   echo $RET
@@ -399,6 +407,7 @@ available_supply() {
 
 # Desc: Show the checked (valid or processed) and unchecked (invalid or queued) total blocks known to the node
 # RPC: block_count
+# Returns: JSON from node RPC
 block_count() {
   $CURL -sS -g -d '{ "action": "block_count" }' "${NODEHOST}"
 }
@@ -408,6 +417,7 @@ block_count() {
 # Desc: Note:   to display blocks.
 # Desc: Note: Only works with the LIVE (PROD) nano network - no BETA API known.
 # RPC: (non nano-node, remote call to /api/blockcount)
+# Returns: Number (processed blocks)
 remote_block_count_nanonodeninja() {
   local RET=
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
@@ -423,6 +433,7 @@ remote_block_count_nanonodeninja() {
 # Desc: Note: This call may break if the given site changes the format used
 # Desc: Note:   to display blocks.
 # RPC: (non nano-node, remote call to /block_count)
+# Returns: Number (processed blocks)
 remote_block_count_nanocrawler() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
@@ -440,6 +451,7 @@ remote_block_count_nanocrawler() {
 # Desc: Note: This call may break if the given site changes the format used
 # Desc: Note:   to display blocks.
 # RPC: (non nano-node, remote call to /block_count)
+# Returns: Number (processed blocks)
 # DEPRECATED: Use remote_block_count_nanocrawler instead.
 remote_block_count_nanomeltingice() {
   remote_block_count_nanocrawler
@@ -449,6 +461,7 @@ remote_block_count_nanomeltingice() {
 # Desc: Note: This call may break if the given site changes the format used
 # Desc: Note:   to display blocks.
 # RPC: (non nano-node, remote call to /blocks/count)
+# Returns: Number (processed blocks)
 remote_block_count_nanowatch() {
   local RET
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
@@ -467,6 +480,7 @@ remote_block_count_nanowatch() {
 # Desc: Note: This call may break if the given site(s) change the format used
 # Desc: Note:   to display blocks.
 # RPC: (non nano-node, remote calls to community run block explorers)
+# Returns: Number (processed blocks average from remote APIs)
 remote_block_count() {
   let GOT_RESULTS=3
   local COUNT1=$(remote_block_count_nanocrawler 2>/dev/null)
@@ -498,6 +512,7 @@ remote_block_count() {
 # P1Desc: If no value specified, defaults to 0.01% of remote_block_count average.
 # RPC: (non nano-node, remote calls to community run block explorers)
 # RPC: block_count
+# Returns: Boolean as number (0 false, 1 true)
 is_local_and_remote_block_counts_similar() {
   local WITHIN_AMOUNT=${1:-}
   
@@ -516,8 +531,9 @@ is_local_and_remote_block_counts_similar() {
 }
 
 # Desc: Query the node version and max compatible protocol version
-# Desc: Returns result directly from node, no parsing/formatting applied.
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: version
+# Returns: JSON from node RPC
 nano_version() {
   $CURL -sS -g -d '{ "action": "version" }' "${NODEHOST}"
 }
@@ -525,6 +541,7 @@ nano_version() {
 # Desc: Query the node version 
 # Desc: Parses the result to only show version string as Major.Minor
 # RPC: version
+# Returns: Decimal version number (major.minor)
 nano_version_number() {
   local RET=$(nano_version 2>/dev/null | $GREP node_vendor | $CUT -d'"' -f4)
   local FULL_VERSION_STRING=
@@ -548,25 +565,28 @@ nano_version_number() {
 }
 
 # Desc: Query the node statistics, type: counters
-# Desc: Returns result directly from node, no parsing/formatting applied.
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: stats:counters
+# Returns: JSON from node RPC
 nano_statistics() {
   $CURL -sS -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
 }
 
 # Desc: Query the nodes known peers
-# Desc: Returns result directly from node, no parsing/formatting applied.
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: peers
+# Returns: JSON from node RPC
 get_peers() {
   local RET=$($CURL -sS -g -d '{ "action": "peers" }' "${NODEHOST}")
   echo $RET
 }
 
 # Desc: Query the account information for the given nano account
-# Desc: Returns result directly from node, no parsing/formatting applied.
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: account_info:account
 # P1: <$nano_address>
 # P1Desc: The nano account address to query
+# Returns: JSON from node RPC
 get_account_info() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" )
@@ -578,6 +598,7 @@ get_account_info() {
 # RPC: account_info:account
 # P1: <$nano_address>
 # P1Desc: The nano account address to query
+# Returns: Hash
 get_frontier_hash_from_account() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP frontier | $CUT -d'"' -f4)
@@ -589,34 +610,53 @@ get_frontier_hash_from_account() {
 # RPC: account_info:account
 # P1: <$nano_address>
 # P1Desc: The nano account address to query
+# Returns: Number
 get_balance_from_account() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP balance | $CUT -d'"' -f4)
   echo $RET
 }
 
-# Desc: Query the pending (unpocketed) blocks for the given nano account
+# Desc: Query the pending (unpocketed) blocks raw value for the given nano account
 # RPC: account_info:account
 # P1: <$nano_address>
 # P1Desc: The nano account address to query
+# Returns: Number
 get_account_pending() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP pending | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Query who the representative is for the given nano account
+# RPC: account_representative:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
+# Returns: Nano address
 get_account_representative() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP representative | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Show the public key for the given nano account
+# RPC: account_key:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
+# Returns: Public key
 get_account_public_key() {
   local ACCOUNT=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP key | $CUT -d'"' -f4)
   echo $RET
 }
 
+# Desc: Does this particular wallet UUID contain the given nano account
+# RPC: wallet_contains:wallet:account
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to check for the given nano account
+# P2: <$nano_address>
+# P2Desc: The nano account address
+# Returns: Boolean as number (1 true, 0 false)
 wallet_contains() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
@@ -624,18 +664,35 @@ wallet_contains() {
   echo $RET
 }
 
+# Desc: Show all known frontier (head blocks) hash 
+# Desc: paired with account numbers for given wallet UUID
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: wallet_frontiers:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to check for frontier-account pairs
+# Returns: JSON from node RPC
 wallet_frontiers() {
   local WALLET=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
   echo $RET
 }
 
+# Desc: Show all known pending and received balances on all accounts
+# Desc: for given wallet UUID
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: wallet_balances:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to check
+# Returns: JSON from node RPC
 wallet_balances() {
   local WALLET=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
   echo $RET
 }
 
+# Desc: Show all known pending and received balances on all accounts
+# Desc: for given wallet UUID
+# Returns: Hash
 pending_exists() {
   local HASH=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4 )
