@@ -235,6 +235,11 @@ is_node_up() {
   error "Your node does not appear to be running. Cannot reach ${NODEHOST}." && return 1
 }
 
+# Desc: Determines the network the node is operating
+# Desc: within. It does this by looking for particular
+# Desc: block hashes.
+# RPC: block:hash
+# Returns: Text (PROD,BETA,OTHER)
 determine_network() {
   local BLOCK_HASH=$(block_info_previous_hash "ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113" 2>/dev/null)
   [[ ${#BLOCK_HASH} -eq 64 ]] && echo "PROD" && return 0
