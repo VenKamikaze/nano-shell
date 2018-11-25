@@ -690,27 +690,45 @@ wallet_balances() {
   echo $RET
 }
 
-# Desc: Show all known pending and received balances on all accounts
-# Desc: for given wallet UUID
-# Returns: Hash
+# Desc: Determine if block with given hash is pending
+# RPC: pending_exists:hash
+# P1: <$hash>
+# P1Desc: The block hash to check
+# Returns: Boolean as number (1 true, 0 false)
 pending_exists() {
   local HASH=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4 )
   echo $RET
 }
 
+# Desc: Tells the node to search for any pending blocks for 
+# Desc: any account within the given wallet
+# RPC: search_pending:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet to scan
+# Returns: Boolean as number (1 true, 0 false) indicating if searching has started
 search_pending() {
   local WALLET=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${NODEHOST}" | $GREP started | $CUT -d'"' -f4 )
   echo $RET
 }
 
+# Desc: Get full block information for the given block hash
+# RPC: block:hash
+# P1: <$hash>
+# P1Desc: The block hash to retrieve detail about
+# Returns: JSON from the node RPC
 block_info() {
   local HASH=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
   echo $RET
 }
 
+# Desc: Get the block hash immediately before the given one
+# RPC: block:hash
+# P1: <$hash>
+# P1Desc: The block hash to retrieve the predecessor for
+# Returns: Hash
 block_info_previous_hash() {
   local HASH=${1:-}
   local FULL_INFO=$(block_info "${HASH}")
@@ -718,7 +736,13 @@ block_info_previous_hash() {
   echo $PREV_HASH
 }
 
-# Get the balance of the account that published block with $HASH (not the amount being sent/received in the block)
+# Desc: Get the balance of the account that published block
+# Desc: with the given hash
+# Desc: after the balance would be added to the account
+# RPC: block:hash
+# P1: <$hash>
+# P1Desc: The block hash to 
+# Returns: Number (account balance)
 block_info_account_balance() {
   local HASH=${1:-}
   local FULL_INFO=$(block_info "${HASH}")
