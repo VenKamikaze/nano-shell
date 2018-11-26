@@ -891,6 +891,17 @@ account_create() {
 
 # Do not use this function, instead use wallet_change_seed, which takes a FILE as a parameter where the FILE
 #   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
+
+# Desc: Change the seed associated with the given wallet UUID
+# Desc: into the given seed.
+# RPC: wallet_change_seed:wallet:seed
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID you wish to associate with the seed
+# P2: <$seed>
+# P2Desc: The seed in plaintext. Note using this function
+# P2Desc: on a shared server is highly unsafe and can 
+# P2Desc: expose your seed.
+# DEPRECATED: Use wallet_change_seed
 wallet_change_seed_UNSAFE() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
