@@ -258,6 +258,8 @@ print_warning() {
 # Desc: Many of the functions in this script require a special environment
 # Desc: variable to be set before they will function.
 # Desc: Outputs '1' if NANO_UNSAFE_COMMANDS environment variable equals 1, otherwise outputs '0'
+# Desc: If you wish to use commands that could cause loss of funds due to misuse
+# Desc: then run 'export NANO_UNSAFE_COMMANDS=1' to enable these functions.
 allow_unsafe_commands() {
   [[ 1 -eq ${NANO_UNSAFE_COMMANDS:-0} ]] && echo 1 || (echo "NANO_UNSAFE_COMMANDS is not set to 1. Ignoring all unsafe commands" >&2 && echo 0)
 }
@@ -871,6 +873,7 @@ accounts_create() {
 # RPC: accounts_create:wallet:count:work
 # P1: <$wallet_uuid>
 # P1Desc: The wallet UUID to create the account within
+# Returns: JSON from node RPC
 account_create() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local WALLET=${1:-}
@@ -889,20 +892,21 @@ account_create() {
 #       These functions can expose your SEED or PRIVATE KEY to OTHER USERS of the system, or ANY user if exploits
 #         exist in any applications running on here exposed to the internet.
 
-# Do not use this function, instead use wallet_change_seed, which takes a FILE as a parameter where the FILE
-#   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
+# If on a shared server, or
+# on an untrusted environment, then it is not recommended to use ANY function below that takes a seed.
+# Doing so may expose your seed, which could lead to loss of funds.
 
 # Desc: Change the seed associated with the given wallet UUID
 # Desc: into the given seed.
+# Desc: WARNING: Do not use this function on a shared server
+# Desc: your seed could be exposed.
 # RPC: wallet_change_seed:wallet:seed
 # P1: <$wallet_uuid>
 # P1Desc: The wallet UUID you wish to associate with the seed
 # P2: <$seed>
-# P2Desc: The seed in plaintext. Note using this function
-# P2Desc: on a shared server is highly unsafe and can 
-# P2Desc: expose your seed.
-# DEPRECATED: Use wallet_change_seed
-wallet_change_seed_UNSAFE() {
+# P2Desc: The seed in plaintext. 
+# Returns: JSON from the node RPC
+wallet_change_seed_text() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
     error "Invalid parameters
@@ -916,6 +920,18 @@ wallet_change_seed_UNSAFE() {
   echo $RET
 }
 
+# Desc: Change the seed associated with the given wallet UUID
+# Desc: into the given seed, sourced from a file.
+# Desc: WARNING: Do not use this function on a shared server
+# Desc: your seed could be exposed.
+# RPC: wallet_change_seed:wallet:seed
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID you wish to associate with the seed
+# P2: <$seed_file>
+# P2Desc: The file containing your plaintext seed. The
+# P2Desc: file should consist of a single line with
+# P2Desc: your seed in plaintext.
+# Returns: JSON from the node RPC
 wallet_change_seed() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
@@ -924,16 +940,36 @@ wallet_change_seed() {
     return 9
   fi
 
+  local RET; local RETVAL
   local WALLET=${1:-}
   local SEED_FILE=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
-  local RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'$(cat "${SEED_FILE}")'" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
-  echo $RET
+
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "wallet_change_seed", "wallet": "${WALLET}", "seed": "$(cat ${SEED_FILE})" }
+JSON
+)
+  RETVAL=$?
+  echo "${RET}"
+  return $RETVAL
 }
 
 # Do not use this function, instead use query_deterministic_keys, which takes a FILE as a parameter where the FILE
 #   contains the SEED text. This command instead takes the SEED text which is UNSAFE.
-query_deterministic_keys_UNSAFE() {
+
+# Desc: For the given seed (in text) output the
+# Desc: number of keys specified by index.
+# Desc: This shows the first X number of accounts
+# Desc: and their public/private keys on the seed.
+# Desc: WARNING: Do not use this function on a shared server
+# Desc: your seed could be exposed.
+# RPC: deterministic_key:seed:index
+# P1: <$seed>
+# P1Desc: The seed as text.
+# P2: <$index>
+# P2Desc: The number of accounts to show
+# Returns: JSON from the node RPC
+query_deterministic_keys_text() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
     error "Invalid parameters
@@ -948,6 +984,20 @@ query_deterministic_keys_UNSAFE() {
   echo $RET
 }
 
+# Desc: For the given seed (in file) output the
+# Desc: number of keys specified by index.
+# Desc: This shows the first X number of accounts
+# Desc: and their public/private keys on the seed.
+# Desc: WARNING: Do not use this function on a shared server
+# Desc: your seed could be exposed.
+# RPC: deterministic_key:seed:index
+# P1: <$seed_file>
+# P1Desc: The file containing your plaintext seed. The
+# P1Desc: file should consist of a single line with
+# P1Desc: your seed in plaintext.
+# P2: <$index>
+# P2Desc: The number of accounts to show
+# Returns: JSON from the node RPC
 query_deterministic_keys() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
@@ -956,17 +1006,32 @@ query_deterministic_keys() {
     return 9
   fi
 
+  local RET; local RETVAL
   local SEED_FILE=${1:-}
   local INDEX=${2:-}
   [[ ! -e "${SEED_FILE}" ]] && echo You must specify the filename containing your SEED as TEXT to use this function. && return 1
-  local RET=$($CURL -sS -g -d '{ "action": "deterministic_key", "seed": "'$(cat "${SEED_FILE}")'", "index": "'${INDEX}'" }' "${NODEHOST}")
-  echo $RET
+
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "deterministic_key", "seed": "$(cat ${SEED_FILE})", "index": "${INDEX}" }
+JSON
+)
+  RETVAL=$?
+  echo "${RET}"
+  return $RETVAL
 }
 
 #######################################
 # Broadcast & PoW commands
 #######################################
 
+# Desc: Generate the PoW for the given block hash
+# RPC: work_generate:hash:use_peers
+# P1: <$hash>
+# P1Desc: The block hash to generate work for.
+# P2o: <$use_peers>
+# P2Desc: Can be set to 0 (false) to prevent farming
+# P2Desc: off the work generation to any work peers
+# Returns: Text (the work signature)
 generate_work() {
   local FRONTIER=${1:-}
   [[ -z "${FRONTIER}" ]] && echo Need a frontier && return 1
@@ -980,6 +1045,11 @@ generate_work() {
   echo $RET
 }
 
+# Desc: Broadcast the given JSON block to the network
+# RPC: process:block
+# P1: <$json_block>
+# P1Desc: The JSON block to broadcast.
+# Returns: Text (block hash) or empty on failure
 broadcast_block() {
   local BLOCK="${1:-}"
   local RET; local RETVAL
