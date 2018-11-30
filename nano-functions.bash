@@ -377,7 +377,7 @@ __nano_shell_help_parameters() {
       echo " Group (${PARAM_POS}): "
       for PARAM_POS2 in $($SEQ 1 9); do
         PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sg${PARAM_POS}P${PARAM_POS2}o")
-        PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}[o]*:\s*\(.*\)/  \1/p")
+        PARAM_VALUES=$(trim $(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}[o]*:\s*\(.*\)/  \1/p"))
         [[ -z "${PARAM_VALUES}" ]] && break
         PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}Desc:\s*\(.*\)/  \1/p")
         [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
@@ -386,6 +386,7 @@ __nano_shell_help_parameters() {
         echo "${PARAM_DESC}"
       done
       echo "${SEP_B}"
+      [[ -z "${PARAM_VALUES}" ]] && break
     else
        PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sP${PARAM_POS}o")
        PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}[o]*:\s*\(.*\)/  \1/p")
@@ -397,7 +398,7 @@ __nano_shell_help_parameters() {
       echo "${PARAM_DESC}"
     fi
   done
-  [[ 1 -eq ${PARAM_POS} ]] && echo "None" || return 0
+  [[ 1 -eq ${PARAM_POS} && 1 -gt ${PARAM_POS2:-0} ]] && echo "None" || return 0
 }
 
 #######################################
@@ -1065,11 +1066,16 @@ JSON
     [[ -z "${HASH}" ]] && error "No hash value returned in broadcast_block. Block was probably invalid and failed to publish!" && return 1
     echo $HASH
   else
-    error "Non-zero return code ($RETVAL) when using RPC to broadcast block in $PAYLOAD_JSON."
+    error "Non-zero return code ($RETVAL) when using RPC to broadcast block \"${BLOCK}\"."
   fi
   return $RETVAL
 }
 
+# Desc: List all associated work peers. These
+# Desc: are peers that help perform PoW operations
+# Desc: (if configured)
+# RPC: work_peers
+# Returns: JSON from the node RPC
 work_peer_list() {
   local RET; local RETVAL
   RET=$($CURL -sS -g -d '{ "action": "work_peers" }' "${NODEHOST}")
@@ -1077,6 +1083,14 @@ work_peer_list() {
   echo $RET; return $RETVAL
 }
 
+# Desc: Add a work peer to farm out the PoW
+# Desc: operations on the node.
+# RPC: work_peer_add:address:port
+# P1: <$work_peer_address>
+# P1Desc: The work peer IP/host address
+# P2: <$work_peer_port>
+# P2Desc: The work peer port number
+# Returns: Text (success) or empty on failure.
 work_peer_add() {
   local ADDRESS="${1:-}"
   local PORT=${2:-}
@@ -1094,6 +1108,10 @@ work_peer_add() {
   return 0
 }
 
+# Desc: Clear the list of all work peers 
+# Desc: configured on the node.
+# RPC: work_peers_clear
+# Returns: Text (success) or empty on failure.
 work_peer_clear_all() {
   local RET; local RETVAL
   RET=$($CURL -sS -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
@@ -1108,6 +1126,11 @@ work_peer_clear_all() {
 # Convenience functions
 #######################################
 
+# Desc: Escapes any special characters in given input
+# Desc: Thanks to: http://stackoverflow.com/a/2705678/120999
+# P1: <$string_input>
+# P1Desc: The string to parse and escape.
+# Returns: The input string with special characters escaped
 unregex() {
   # This is a function because dealing with quotes is a pain.
   # http://stackoverflow.com/a/2705678/120999
@@ -1115,8 +1138,10 @@ unregex() {
 }
 
 # Desc: Simple trim (POSIX compliant)
+# Desc: to remove leading and trailing whitespace.
 # Desc: Thanks to stackoverflow comment: 
 # Desc: https://stackoverflow.com/questions/369758/how-to-trim-whitespace-from-a-bash-variable
+# Returns: The input trimmed
 trim() {
     local var="$*"
     # remove leading whitespace characters
@@ -1126,6 +1151,12 @@ trim() {
     echo -n "$var"
 }
 
+# Desc: Parses resulting blocks and strips out leading
+# Desc: colon-space-quote and trailing quote from string
+# P1: <$JSON_block_result_from_node_RPC>
+# P1Desc: Block result from node RPC for stripping.
+# Returns: Block with stripped characters ready for 
+# Returns: broadcasting or other use.
 strip_block() {
   local TEMPV="${1:-}"
   #Strip ': "' from front and '"' from back.
@@ -1136,7 +1167,11 @@ strip_block() {
   echo "$TEMPV"
 }
 
-# Assumes DECIMAL amount for RAW
+# Desc: Converts from nano raw amounts into
+# Desc: MNano (standard measurement unit in 2018)
+# P1: <$raw_nano_amount_number>
+# P1Desc: The raw nano amount to convert into MNano
+# Returns: Number (MNano to two decimal places only)
 raw_to_mnano() {
   local RAW_AMOUNT=${1:-}
 
@@ -1149,12 +1184,39 @@ raw_to_mnano() {
 # E.g. 1 means error (not an integer) 
 #      0 means success (is an integer)
 # Also add textual booleans for convenience
+
+# Desc: Check if input satisfies criteria 
+# Desc: to be an integer.
+# P1: <$input>
+# P1Desc: The input string to check.
+# Returns: Boolean as string (true) if integer
+# Returns: or false if not.
+# Returns: Also function return codes are C-style
+# Returns: RETVAL is 1 if error (NaN)
+# Returns: or 0 if success (is integer)
 is_integer() {
   local INPUT="${1:-}"
   [[ -n ${INPUT//[0-9]/} ]] && echo "false" && return 1
   echo "true" && return 0
 }
 
+# Desc: Update nano-shell to the latest version
+# Desc: This will only succeed if no (or minimal)
+# Desc: changes have been made to the script itself.
+# Desc: nano-shell checks this by calculating an MD5SUM
+# Desc: of the file (with certain variables excluded)
+# Desc: and comparing it to the internal MD5SUM variable
+# Desc: If they don't match, it will download the new
+# Desc: version of nano-shell, but leave it alongside
+# Desc: the old script with the same filename and
+# Desc: the extension '.new' added to it.
+# P1o: <master,testing,bleeding>
+# P1Desc: You can specify which branch to pull the
+# P1Desc: release from. It defaults to 'master'
+# P1Desc: but you can pull the 'testing' version
+# P1Desc: or even 'bleeding' but this is not recommended
+# Returns: Status message indicating whether this was
+# Returns: a success or the failure reason.
 update_nano_functions() {
   local TESTING=${1:-}
   local BRANCH="master"
@@ -1188,15 +1250,27 @@ update_nano_functions() {
   fi
 }
 
+# Desc: Get the calculated md5sum of nano-shell
+# Desc: excluding variables:
+# Desc: NANO_FUNCTIONS_HASH, NODEHOST DEBUG
+# Returns: md5sum of nano-shell
 get_nano_functions_md5sum() {
   local NANO_FUNCTIONS_HASH=$($GREP -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | $GREP -vE '^NODEHOST=.*$' | $GREP -vE '^DEBUG=.*$' | md5sum)
   echo "${NANO_FUNCTIONS_HASH:0:32}"
 }
 
+# Desc: Get the major version of the node
+# Desc: e.g. if you run node v16.3
+# Desc: it will return 16
+# Returns: Number (major version of node)
 get_nano_version_major() {
   echo "${NANO_NODE_VERSION}" | $CUT -d'.' -f1
 }
 
+# Desc: Get the minor version of the node
+# Desc: e.g. if you run node v16.3
+# Desc: it will return 3
+# Returns: Number (minor version of node)
 get_nano_version_minor() {
   local RET=$(echo "${NANO_NODE_VERSION}" | $CUT -d'.' -f2)
   [[ -z "${RET}" ]] && echo 0
@@ -1208,6 +1282,16 @@ get_nano_version_minor() {
 # E.g. 1 means error (not an integer) 
 #      0 means success (is an integer)
 # Also add textual booleans for convenience
+
+# Desc: Checks if the node version of greater or equal
+# Desc: to the given major and minor version parameters
+# P1: <$major_number>
+# P1Desc: The major version to compare
+# P2: <$minor_number>
+# P2Desc: The minor version to compare
+# Returns: Boolean as string (true or false)
+# Returns: Also uses C-style function return
+# Returns: code, e.g. 0 if true, 1 if false.
 is_version_equal_or_greater() {
   local MAJOR="${1:-}"
   local MINOR="${2:-}"
@@ -1232,6 +1316,36 @@ is_version_equal_or_greater() {
 #######################################
 
 #Wrapper that calls the appropriate internal __create_open_block_.* methods based on parameters passed in
+# Note: help for parameter group 2 is disabled as it has not been tested.
+
+# Desc: Create and broadcast an open block
+# Desc: (state) on the nano network
+# g1P1: <$private_key>
+# g1P1Desc: The private key of the broadcasting account
+# g1P2: <$source_block_hash>
+# g1P2Desc: The source block hash to pocket
+# g1P3: <$destaccount>
+# g1P3Desc: The destination account to receive 
+# g1P3Desc: the funds into (and open the account)
+# g1P4: <$representative_account>
+# g1P4Desc: The representative to set for the 
+# g1P4Desc: $destaccount
+## g2P1: <$wallet_uuid>
+## g2P1Desc: The wallet UUID to use for broadcasting
+## g2P1Desc: the open block
+## g2P2: <$destaccount>
+## g2P2Desc: The destination account to receive
+## g2P2Desc: the funds into (and open the account)
+## g2P3: <$source_block_hash>
+## g2P3Desc: The source block hash to pocket
+## g2P4: <$destaccount>
+## g2P4Desc: The destination account to receive
+## g2P4Desc: the funds into (and open the account)
+## g2P5: <$representative_account>
+## g2P5Desc: The representative to set for the 
+## g2P5Desc: $destaccount
+# Returns: Text (block hash) of the broadcast open block
+# Returns: if successful.
 open_block() {
   local NEWBLOCK; local RET=255
   if [[ $# -eq 4 ]]; then
@@ -1253,6 +1367,21 @@ open_block() {
 }
 
 #Wrapper that calls the appropriate internal __create_send_block_.* methods based on parameters passed in
+
+# Desc: Create and broadcast a send block
+# Desc: (state) on the nano network
+# g1P1: <$private_key>
+# g1P1Desc: The private key of the broadcasting account
+# g1P2: <$account>
+# g1P2Desc: The broadcasting account (sender)
+# g1P3: <$destaccount>
+# g1P3Desc: The destination account to send 
+# g1P3Desc: the funds to 
+# g1P4: <$balance_MNano>
+# g1P4Desc: The NANO (MNano) amount to send
+# g1P4Desc: to the $destaccount
+# Returns: Text (block hash) of the broadcast send block
+# Returns: if successful.
 send_block() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local NEWBLOCK; local RET=255
@@ -1276,6 +1405,16 @@ send_block() {
 }
 
 #Wrapper that calls the appropriate internal __create_receive_block.* methods based on parameters passed in
+# Desc: Create and broadcast a receive block
+# Desc: (state) on the nano network
+# g1P1: <$private_key>
+# g1P1Desc: The private key of the broadcasting account
+# g1P2: <$source_block_hash>
+# g1P2Desc: The block hash to pocket
+# g1P3: <$destaccount>
+# g1P3Desc: The account to receive the funds
+# Returns: Text (block hash) of the broadcast receive block
+# Returns: if successful.
 receive_block() {
   local NEWBLOCK; local RET=255
   if [[ $# -eq 3 ]]; then
@@ -1298,6 +1437,18 @@ receive_block() {
 }
 
 #Wrapper that calls the appropriate internal __create_changerep_block.* methods based on parameters passed in
+
+# Desc: Create and broadcast a change
+# Desc: representative block
+# Desc: (state) on the nano network
+# g1P1: <$private_key>
+# g1P1Desc: The private key of the broadcasting account
+# g1P2: <$account>
+# g1P2Desc: The nano account to change the representative of.
+# g1P3: <$representative_account>
+# g1P3Desc: The representative account to set for
+# g1P3Desc: $account
+# Returns: Text (block hash) of the broadcast change block
 changerep_block() {
   local NEWBLOCK; local RET=255
   if [[ $# -eq 3 ]]; then
