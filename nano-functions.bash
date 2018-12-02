@@ -1473,24 +1473,59 @@ changerep_block() {
 # Stress-test functions
 #######################################
 
-# This function will loop forever until interrupted or until a failure occurs.
-# It loops forever running the 'generate_spam_and_broadcast' function.
+# Desc: This function will loop until interrupted
+# Desc: or until a failure occurs.
+# Desc: It loops running the 'generate_spam_and_broadcast' function.
+# P1: <$private_key>
+# P1Desc: The private key of the broadcasting account
+# P2: <$account_address>
+# P2Desc: The sending account address
+# P3: <$dest_account_address>
+# P3Desc: The destination account address
+# P3Desc: to receive the spam sends.
+# P4o: <$blocks_to_create_in_batch>
+# P4Desc: The number of blocks to generate per batch
+# P4Desc: e.g. if set to 5, it will pre-generate 5 blocks
+# P4Desc: then will send all 5, and will then repeat.
+# P4Desc: If not specified, will attempt to use
+# P4Desc: the value set in the environment variable
+# P4Desc: named BLOCKS_TO_CREATE, otherwise defaults to 1
 generate_spam_and_broadcast_until_stopped() {
+  local PREGENERATE_BLOCKS_NUMBER=${4:-1}
+  [[ -n "${BLOCKS_TO_CREATE}" && $# -ne 4 ]] && PREGENERATE_BLOCKS_NUMBER=${BLOCKS_TO_CREATE}
+
   while true; do
-    generate_spam_and_broadcast $@
+    generate_spam_and_broadcast $@ ${PREGENERATE_BLOCKS_NUMBER}
     [[ $? -ne 0 ]] && error "Call to generate_spam_and_broadcast failed. Aborting infinite loop and exiting..." && return 1
   done
 }
 
-# This function generates BLOCKS_TO_CREATE blocks, and then immediately sends them
+# Desc: This function generates a given number
+# Desc: of blocks, and then immediately sends them.
+# P1: <$private_key>
+# P1Desc: The private key of the broadcasting account
+# P2: <$account_address>
+# P2Desc: The sending account address
+# P3: <$dest_account_address>
+# P3Desc: The destination account address
+# P3Desc: to receive the spam sends.
+# P4: <$blocks_to_create_in_batch>
+# P4Desc: The number of blocks to generate per batch
+# P4Desc: e.g. if set to 5, it will pre-generate 5 blocks
+# P4Desc: then send all 5.
+# P4Desc: Note: can be specified in environment variable
+# P4Desc: named BLOCKS_TO_CREATE for backwards compatibility.
 generate_spam_and_broadcast() {
-  [[ $# -ne 3 ]] && error "Invalid parameters
+  [[ $# -ne 3 || $# -ne 4 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
+
+  local BLOCKS_TO_CREATE=${BLOCKS_TO_CREATE:-}
+  [[ $# -eq 4 ]] && BLOCKS_TO_CREATE=${4}
 
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$($MKTEMP --tmpdir block_store_temp.XXXXX)
 
-  generate_spam_sends_to_file $@
+  generate_spam_sends_to_file $@ ${BLOCKS_TO_CREATE}
   [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && $RM -f "${BLOCK_STORE}" && return 1
 
   send_pre-generated_blocks
@@ -1500,13 +1535,43 @@ generate_spam_and_broadcast() {
   return $RET
 }
 
-# This function generates BLOCKS_TO_CREATE blocks, and writes them to file BLOCK_STORE
+# Desc: This function generates a given number 
+# Desc: of blocks and writes them to a file
+# P1: <$private_key>
+# P1Desc: The private key of the broadcasting account
+# P2: <$account_address>
+# P2Desc: The sending account address
+# P3: <$dest_account_address>
+# P3Desc: The destination account address
+# P4o: <$blocks_to_create_in_batch>
+# P4Desc: The number of blocks to generate per batch
+# P4Desc: e.g. if set to 5, it will generate 5 blocks
+# P4Desc: This parameter can also be specified in environment variable
+# P4Desc: named BLOCKS_TO_CREATE for backwards compatibility.
+# P4Desc: If not specified, will default to 1
+# P5o: <$block_store_file>
+# P5Desc: The file that will contain the blocks generated
+# P5Desc: If this file already exists and the associated
+# P5Desc: $block_store_file.hash file also exists
+# P5Desc: then nano-shell will resume generating blocks
+# P5Desc: from the last block+hash generated in the file.
+# P5Desc: This parameter can also be specified in environment variable
+# P5Desc: named BLOCK_STORE for backwards compatibility.
+# P5Desc: If not specified, will default to your $TMPDIR
+# P5Desc: in a file named 'block_store_temp.XXXXX'
 generate_spam_sends_to_file() {
-  [[ $# -ne 3 ]] && error "Invalid parameters
+  [[ $# -ne 3 || $# -ne 4 || $# -ne 5 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
 
-  [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
-  [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
+  local BLOCK_STORE="${BLOCK_STORE:-}"
+  [[ $# -eq 5 ]] && BLOCK_STORE="${5:-}"
+  [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$($MKTEMP --tmpdir block_store_temp.XXXXX)
+
+  local BLOCKS_TO_CREATE=${BLOCKS_TO_CREATE:-}
+  [[ $# -ge 4 ]] && BLOCKS_TO_CREATE=${4:-1}
+
+  [[ ! -e "${BLOCK_STORE:-}" ]] && error "\$block_store_file does not exist and could not be created. Is the location writable?" && return 3
+  [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "\$blocks_to_create_in_batch should be specified as an integer." && return 3
 
   local CURRENT_BALANCE
   local PREVIOUS_BLOCK_HASH
