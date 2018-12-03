@@ -281,7 +281,45 @@ error() {
 }
 
 #######################################
-# Help command
+# Node operation commands
+#######################################
+
+# Desc: Shuts down the nano node
+# RPC: stop
+# Returns: JSON from the node RPC
+stop_node() {
+  local RET=$($CURL -sS -g -d '{ "action": "stop" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
+  echo $RET
+}
+
+# Desc: Shows bootstrap status
+# Desc: (unstable RPC call - may not be
+# Desc:  available in future version)
+# RPC: bootstrap_status
+# Returns: JSON from the node RPC
+bootstrap_status() {
+  if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
+    error "Node v17.0RC1 and above required to use this RPC call"
+    return 1
+  fi
+  $CURL -sS -g -d '{ "action": "bootstrap_status" }' "${NODEHOST}"
+}
+
+# Desc: Initiates a lazy bootstrapping attempt
+# RPC: bootstrap_lazy
+# Returns: Text (started) or empty if failure
+bootstrap_lazy() {
+  if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
+    error "Node v17.0RC1 and above required to use this RPC call"
+    return 1
+  fi
+  local RET=$($CURL -sS -g -d '{ "action": "bootstrap_lazy" }' "${NODEHOST}" | $GREP started | $CUT -d'"' -f2)
+  echo $RET
+}
+
+
+#######################################
+# Help commands
 #######################################
 
 # Desc: Provides help for functions provided by nano-shell.
@@ -1947,11 +1985,6 @@ __create_changerep_block_privkey() {
   echo "$BLOCK"
 }
 
-stop_node() {
-  local RET=$($CURL -sS -g -d '{ "action": "stop" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
-  echo $RET
-}
-
 check_dependencies
 [[ $? -ne 0 ]] && echo "${BASH_SOURCE[0]} had dependency errors - this script may not function." || echo "${BASH_SOURCE[0]} sourced."
 
@@ -1966,4 +1999,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=6394525af53846a218a267ac2672fc2e
+NANO_FUNCTIONS_HASH=da0e8ff4d0902f9af5b90e1bab7233c1
