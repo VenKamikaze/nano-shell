@@ -1302,6 +1302,7 @@ get_nano_functions_md5sum() {
 # Desc: it will return 16
 # Returns: Number (major version of node)
 get_nano_version_major() {
+  [[ -z "${NANO_NODE_VERSION:-}" ]] && NANO_NODE_VERSION=$(nano_version_number)
   echo "${NANO_NODE_VERSION}" | $CUT -d'.' -f1
 }
 
@@ -1310,6 +1311,7 @@ get_nano_version_major() {
 # Desc: it will return 3
 # Returns: Number (minor version of node)
 get_nano_version_minor() {
+  [[ -z "${NANO_NODE_VERSION:-}" ]] && NANO_NODE_VERSION=$(nano_version_number)
   local RET=$(echo "${NANO_NODE_VERSION}" | $CUT -d'.' -f2)
   [[ -z "${RET}" ]] && echo 0
   echo "${RET}"
