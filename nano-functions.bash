@@ -156,9 +156,13 @@ NANO_NODE_VERSION_UNKNOWN=99.99
 PROD_BURN_TX_HASH=ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113
 BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23
 
-# Try to find $PROG on our $PATH, otherwise attempt to find
-#   it in a few common places before giving up...
-# Will echo the pathfile of $PROG if found, or empty+non-zero return code
+# Desc: (Internal function)
+# Desc: Try to find $PROG on our $PATH, otherwise attempt to find
+# Desc: it in a few common places before giving up...
+# Desc: Will echo the pathfile of $PROG if found, or empty+non-zero return code
+# P1m: <String, $binaryExecutable>
+# P1Desc: Pass in the executable you wish to check the existence of.
+# Returns: Text (path to binary executable if found) and return code (0 is success)
 __find_dependency() {
   local PROG="${1:-}"
   [[ -z "$PROG" ]] && error "You must specify executable file to find"
@@ -187,6 +191,12 @@ __find_dependency() {
   return 1
 }
 
+# TODO: fix this to output ALL dependencies missing, rather than bombing out
+# TODO: on first one missing.
+# Desc: Checks if dependencies required by nano-shell can be found
+# Desc: If not, will echo to stderr a message indicating which dependency
+# Desc: Could not be found, and returns a unique error code
+# Returns: Text to stderr if dependency missing and return code (0 is success)
 check_dependencies() {
   WHICH=$(__find_dependency $WHICH)
   if [[ $? -ne 0 ]]; then
@@ -229,6 +239,11 @@ check_dependencies() {
 # However, we will make this function return C style exit codes
 # E.g. 1 means error (not an integer) 
 #      0 means success (is an integer)
+# Desc: Checks if the node is running by executing a block_count RPC call
+# Desc: Will echo 'Node is running' and returns 0 if UP
+# Desc: Otherwise outputs an error message and returns 0 if DOWN
+# RPC: block_count
+# Returns: Text and return code (0 is UP, 1 is DOWN)
 is_node_up() {
   local RET=$(block_count)
   [[ "${RET}" == *"count"* ]] && echo "Node is running" && return 0
@@ -250,6 +265,7 @@ determine_network() {
   echo "OTHER" && return 2
 }
 
+# Desc: Prints a warning if using this script on the mainnet.
 print_warning() {
   [[ "${NANO_NETWORK_TYPE}" == "PROD" ]] && echo "Please be cautious using this on the LIVE nano network. I cannot be held responsible for any loss of funds or damages through the use of this script."
   return 0
@@ -275,6 +291,7 @@ debug() {
 # Desc: Prints error messages
 # P1m: <Unlimited length string>
 # P1Desc: Pass in any message to print it to stderr, and also print the function caller
+# Returns: Text to stderr
 error() {
   echo " ! ${FUNCNAME[1]:-#SHELL#}: " >&2
   echo " !! $@" >&2
@@ -1384,6 +1401,10 @@ is_version_equal_or_greater() {
 ## g2P5: <$representative_account>
 ## g2P5Desc: The representative to set for the 
 ## g2P5Desc: $destaccount
+# RPC: account_info:account
+# RPC: block:hash
+# RPC: block_create:type:key:representative:source:destination:previous:balance
+## RPC: block_create:type:wallet:account:representative:source:destination:previous:balance
 # Returns: Text (block hash) of the broadcast open block
 # Returns: if successful.
 open_block() {
@@ -1600,8 +1621,8 @@ generate_spam_and_broadcast() {
 # P5Desc: If not specified, will default to your $TMPDIR
 # P5Desc: in a file named 'block_store_temp.XXXXX'
 generate_spam_sends_to_file() {
-  [[ $# -ne 3 || $# -ne 4 || $# -ne 5 ]] && error "Invalid parameters
-                    expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
+  [[ $# -lt 3 || $# -gt 5 ]] && error "Invalid parameters
+                    expected: PRIVKEY SOURCE DESTACCOUNT [BLOCKS_TO_CREATE_IN_BATCH] [BLOCK_STORE_FILE]" && return 9
 
   local BLOCK_STORE="${BLOCK_STORE:-}"
   [[ $# -eq 5 ]] && BLOCK_STORE="${5:-}"
@@ -1634,7 +1655,7 @@ generate_spam_sends_to_file() {
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
     local IGNORE_BLOCK_COUNT_CHECK=1
-    __generate_spam_send_to_file $@
+    __generate_spam_send_to_file $1 $2 $3
     [[ $? -ne 0 ]] && error "Bombing out due to error in generate_spam_send_to_file" && return 1
 
     $PRINTF "\rCreated %${#BLOCKS_TO_CREATE}d blocks" "$((idx+1))"
@@ -1645,6 +1666,16 @@ generate_spam_sends_to_file() {
   echo '...done!'
 }
 
+# Desc: (Internal function)
+# Desc: This function generates a given number 
+# Desc: of blocks and writes them to a file
+# Desc: This function expects particular environment variables
+# P1: <$private_key>
+# P1Desc: The private key of the broadcasting account
+# P2: <$account_address>
+# P2Desc: The sending account address
+# P3: <$dest_account_address>
+# P3Desc: The destination account address
 __generate_spam_send_to_file() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
 
@@ -1672,7 +1703,16 @@ __generate_spam_send_to_file() {
   fi
 }
 
-# This function broadcasts all blocks contained within file BLOCK_STORE
+# Desc: This function broadcasts all blocks contained within 
+# Desc: filename defined by environment variable $BLOCK_STORE
+# Desc: This function expects particular environment variables
+# Desc: If a failure happens on broadcast, this function will
+# Desc: attempt to truncate the broadcast blocks from $BLOCK_STORE
+# Desc: and keep any unbroadcast blocks in $BLOCK_STORE
+# Desc: Successfully broadcast blocks can be found afterwards
+# Desc: under ${BLOCK_STORE}.(current_date).sent
+# Desc: Note: Modifies file defined in $BLOCK_STORE
+# Returns: Counter of blocks broadcast
 send_pre-generated_blocks() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 1
   [[ ! -f "${BLOCK_STORE}" ]] && error "File ${BLOCK_STORE} did not exist. Did you run 'generate_spam_sends_to_file'?" && return 1
@@ -1711,6 +1751,25 @@ send_pre-generated_blocks() {
 # Block generation functions
 #######################################
 
+# Desc: (Internal function)
+# Desc: Creates an open block (state)
+# Desc: to pocket funds from an existing SOURCE block
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# P1: <$private_key>
+# P1Desc: The private key of the broadcasting account
+# P2: <$source_block_hash>
+# P2Desc: The source block hash to pocket
+# P3: <$dest_account_address>
+# P3Desc: The destination account to receive 
+# P3Desc: the funds into (and open the account)
+# P4: <$representative_account>
+# P4Desc: The representative to set for the 
+# P4Desc: newly opened $dest_account_address
+# RPC: account_info:account
+# RPC: block:hash
+# RPC: block_create:type:key:representative:source:destination:previous:balance
+# Returns: JSON from node RPC (open block)
 __create_open_block_privkey() {
   local PRIVKEY=${1:-}
   local SOURCE=${2:-}
@@ -1764,7 +1823,28 @@ __create_open_block_privkey() {
   echo "$BLOCK"
 }
 
-# Expects WALLET and ACCOUNT params (did not work for me)
+# TODO: Untested - check this function works
+# Desc: (Internal function)
+# Desc: Creates an open block (state)
+# Desc: to pocket funds from an existing SOURCE block
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID containing the nano address to open
+# P2: <$nano_address>
+# P2Desc: The nano account address to pocket the funds
+# P3: <$source_block_hash>
+# P3Desc: The source block hash to pocket
+# P4: <$dest_account_address>
+# P4Desc: The destination account to receive 
+# P4Desc: the funds into (and open the account)
+# P5: <$representative_account>
+# P5Desc: The representative to set for the 
+# P5Desc: newly opened $dest_account_address
+# RPC: account_info:account
+# RPC: block:hash
+# RPC: block_create:type:wallet:account:representative:source:destination:previous:balance
+# Returns: JSON from node RPC (open block)
 __create_open_block_wallet() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
@@ -1775,7 +1855,10 @@ __create_open_block_wallet() {
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=0
   local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
-  [[ -z "$CURRENT_BALANCE" ]] && CURRENT_BALANCE=0
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
+    CURRENT_BALANCE=0
+  fi
 
   local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
 
@@ -1816,6 +1899,25 @@ __create_open_block_wallet() {
   echo "$BLOCK"
 }
 
+# Desc: (Internal function)
+# Desc: Creates a send block (state)
+# Desc: to transfer <$amount_raw> from 
+# Desc: <$source_account_address> to a <$dest_account_address>
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# P1: <$private_key>
+# P1Desc: The private key of the sender
+# P2: <$source_account_address>
+# P2Desc: The account that is sending the funds
+# P3: <$dest_account_address>
+# P3Desc: The destination account to receive the funds
+# P4: <$amount_raw>
+# P4Desc: The amount of nano (RAW) to send.
+# RPC: account_info:account
+# RPC: block:hash
+# RPC: account_representative:account
+# RPC: block_create:type:key:source:destination:previous:balance:representative
+# Returns: JSON from node RPC (send block)
 __create_send_block_privkey() {
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
@@ -1876,7 +1978,26 @@ __create_send_block_privkey() {
   echo "$BLOCK"
 }
 
-
+# Desc: (Internal function)
+# Desc: Creates a receive block (state)
+# Desc: to pocket funds found in <$source_block_hash>
+# Desc: to <$dest_account_address>
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# P1: <$private_key>
+# P1Desc: The private key of the sender
+# P2: <$source_block_hash>
+# P2Desc: The existing block hash on the network that
+# P2Desc: contains the funds to pocket
+# P3: <$dest_account_address>
+# P3Desc: The destination account to receive the funds
+# P4o: <$representative>
+# P4Desc: The representative for <$dest_account_address>
+# RPC: account_info:account
+# RPC: account_representative:account
+# RPC: block:hash
+# RPC: block_create:type:key:representative:source:destination:previous:balance
+# Returns: JSON from node RPC (receive block)
 __create_receive_block_privkey() {
   local PRIVKEY=${1:-}
   local SOURCE=${2:-}
@@ -1935,6 +2056,23 @@ __create_receive_block_privkey() {
   echo "$BLOCK"
 }
 
+# Desc: (Internal function)
+# Desc: Creates a change representative block (state)
+# Desc: for <$dest_account_address>
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# P1: <$private_key>
+# P1Desc: The private key for the <$dest_account_address>
+# P2: <$dest_account_address>
+# P2Desc: The nano account address to change
+# P2Desc: the <$representative> for.
+# P3: <$representative>
+# P3Desc: The representative to set
+# P3Desc: for <$dest_account_address>
+# RPC: account_info:account
+# RPC: account_representative:account
+# RPC: block_create:type:key:account:link:previous:balance:representative
+# Returns: JSON from node RPC (change representative block)
 __create_changerep_block_privkey() {
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
@@ -2001,4 +2139,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=da0e8ff4d0902f9af5b90e1bab7233c1
+NANO_FUNCTIONS_HASH=0fb7b87d3bc33d25fb14dd5981c1fecf
