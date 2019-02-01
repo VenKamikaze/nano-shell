@@ -5,11 +5,12 @@ Disclaimer: I cannot be held responsible for any loss or damages resulting from 
 
 ## Basic Usage
 
-Download the script:
+Already have a nano node running with rpc_enabled ?
+Download the script and source it into your shell!
+```
 wget  https://raw.githubusercontent.com/VenKamikaze/nano-shell/master/nano-functions.bash
-
-Source it into your shell:
 source ./nano-functions.bash
+```
 
 And start using it!
 
