@@ -481,17 +481,28 @@ block_count() {
 # Desc: Note: Only works with the LIVE (PROD) nano network - no BETA API known.
 # RPC: (non nano-node, remote call to /api/blockcount)
 # Returns: Number (processed blocks)
-remote_block_count_nanonodeninja() {
+remote_block_count_mynanoninja() {
   local RET=
   if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
-    RET=$($CURL -sS -m5 -g "https://nanonode.ninja/api/blockcount" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+    RET=$($CURL -sS -m5 -g "https://mynano.ninja/api/blockcount" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
+  elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
+    RET=$($CURL -sS -m5 -g "https://beta.mynano.ninja/api/blockcount" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
   else
-    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanonodeninja. Cannot determine remote block count."
+    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at My Nano Ninja. Cannot determine remote block count."
   fi
 
   [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
 }
 
+# Desc: Query the public API at the given site to retrieve a block count
+# Desc: Note: This call may break if the given site changes the format used
+# Desc: Note:   to display blocks.
+# RPC: (non nano-node, remote call to /block_count)
+# Returns: Number (processed blocks)
+# DEPRECATED: Use remote_block_count_mynanoninja instead.
+remote_block_count_nanonodeninja() {
+  remote_block_count_mynanoninja
+}
 # Desc: Query the public API at the given site to retrieve a block count
 # Desc: Note: This call may break if the given site changes the format used
 # Desc: Note:   to display blocks.
@@ -539,7 +550,7 @@ remote_block_count_nanowatch() {
 }
 
 # Desc: Query the public APIs at three different sites and averages the result
-# Desc: Sites: Nano Crawler, Nano Node Ninja, Nano Watch
+# Desc: Sites: Nano Crawler, My Nano Ninja, Nano Watch
 # Desc: Note: This call may break if the given site(s) change the format used
 # Desc: Note:   to display blocks.
 # RPC: (non nano-node, remote calls to community run block explorers)
@@ -547,11 +558,11 @@ remote_block_count_nanowatch() {
 remote_block_count() {
   let GOT_RESULTS=3
   local COUNT1=$(remote_block_count_nanocrawler 2>/dev/null)
-  [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT2=$(remote_block_count_nanonodeninja 2>/dev/null)
   [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT3=$(remote_block_count_nanowatch 2>/dev/null)
+  local COUNT2=$(remote_block_count_mynanoninja 2>/dev/null)
   [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
+  local COUNT3=$(remote_block_count_nanowatch 2>/dev/null)
+  [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   
   if [[ 0 -eq $GOT_RESULTS ]]; then
     error "Unable to retrieve a remote block count from a reliable source. Is your network connection OK?"
