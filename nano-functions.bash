@@ -2150,4 +2150,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=0fb7b87d3bc33d25fb14dd5981c1fecf
+NANO_FUNCTIONS_HASH=3506d6fb05487e8e6baa603be1b5a6f4
