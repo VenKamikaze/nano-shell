@@ -33,8 +33,11 @@ api_detail() {
   set -f
   for func in ${ALL_HELP}; do
     echo $LINESEP
-    echo "## ${func}"
+    echo "## ${func}  "
+    echo $LINESEP
+    echo '```'
     nano_shell_help "${func}"
+    echo '```'
     echo $LINESEP
   done
   set +f
