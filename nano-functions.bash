@@ -1304,7 +1304,7 @@ update_nano_functions() {
         echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
         PRE_SED_HASH=$(get_nano_functions_md5sum "${NANO_FUNCTIONS_LOCATION}.new")
         echo "Setting NODEHOST variable in new script."
-        $SED -i 's/^NODEHOST=\".*\"$/NODEHOST="'${NODEHOST}'"/g' 
+        $SED -i 's/^NODEHOST=\".*\"$/NODEHOST="'${NODEHOST}'"/g' "${NANO_FUNCTIONS_LOCATION}.new"
         if [[ "$PRE_SED_HASH" != $(get_nano_functions_md5sum "${NANO_FUNCTIONS_LOCATION}.new") ]]; then
           error "Setting new NODEHOST variable failed."
           error "nano-shell could not be updated."
@@ -2168,4 +2168,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=cc02b213b63384f3cd5cfd4ab144d29b
+NANO_FUNCTIONS_HASH=6f53fa90868c7951fd2bab01ecdabdaa
