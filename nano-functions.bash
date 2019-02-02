@@ -1570,7 +1570,7 @@ generate_spam_and_broadcast_until_stopped() {
   [[ -n "${BLOCKS_TO_CREATE}" && $# -ne 4 ]] && PREGENERATE_BLOCKS_NUMBER=${BLOCKS_TO_CREATE}
 
   while true; do
-    generate_spam_and_broadcast $@ ${PREGENERATE_BLOCKS_NUMBER}
+    generate_spam_and_broadcast $1 $2 $3 ${PREGENERATE_BLOCKS_NUMBER}
     [[ $? -ne 0 ]] && error "Call to generate_spam_and_broadcast failed. Aborting infinite loop and exiting..." && return 1
   done
 }
@@ -1600,7 +1600,7 @@ generate_spam_and_broadcast() {
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$($MKTEMP --tmpdir block_store_temp.XXXXX)
 
-  generate_spam_sends_to_file $@ ${BLOCKS_TO_CREATE}
+  generate_spam_sends_to_file $1 $2 $3 ${BLOCKS_TO_CREATE}
   [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && $RM -f "${BLOCK_STORE}" && return 1
 
   send_pre-generated_blocks
@@ -1638,6 +1638,7 @@ generate_spam_sends_to_file() {
   [[ $# -lt 3 || $# -gt 5 ]] && error "Invalid parameters
                     expected: PRIVKEY SOURCE DESTACCOUNT [BLOCKS_TO_CREATE_IN_BATCH] [BLOCK_STORE_FILE]" && return 9
 
+  debug "generate_spam_sends_to_file 1=$1 2=$2 3=$3 4=$4 5=$5"
   local BLOCK_STORE="${BLOCK_STORE:-}"
   [[ $# -eq 5 ]] && BLOCK_STORE="${5:-}"
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$($MKTEMP --tmpdir block_store_temp.XXXXX)
@@ -2153,4 +2154,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=00bddc5766daa8609f2a8fbdd70ae7c5
+NANO_FUNCTIONS_HASH=68fea4d40ceab2af794bbda8185fee7d
