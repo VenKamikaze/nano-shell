@@ -12,10 +12,13 @@ NANO_FUNCTIONS_VERSION=0.95
 
 # Version: 0.95
 #          - Feature
-#                   - API documentation for functions.
+#                   - API documentation for functions. Access with nano_shell_help <funcname>
 #                   - nanonodeninja -> My Nano Ninja (Thanks BitDesert)
+#                   - update_nano_functions will now attempt to reset the NODEHOST variable
 #          - Bugfix
 #                   - Fix node version checking for RC releases.
+#          - Refactor
+#                   - Reduce dependence on environment vars for spam functions
 #
 # Version: 0.9401
 #          - Bugfix
@@ -1299,6 +1302,16 @@ update_nano_functions() {
       if [[ "${OLD_SCRIPT_HASH}" == "${NANO_FUNCTIONS_HASH}" ]]; then
         echo "Hash check for ${NANO_FUNCTIONS_LOCATION} succeeded and matched internal hash."
         echo "$(basename ${NANO_FUNCTIONS_LOCATION}) downloaded OK... renaming old script and replacing with new."
+        PRE_SED_HASH=$(get_nano_functions_md5sum "${NANO_FUNCTIONS_LOCATION}.new")
+        echo "Setting NODEHOST variable in new script."
+        $SED -i 's/^NODEHOST=\".*\"$/NODEHOST="'${NODEHOST}'"/g' 
+        if [[ "$PRE_SED_HASH" != $(get_nano_functions_md5sum "${NANO_FUNCTIONS_LOCATION}.new") ]]; then
+          error "Setting new NODEHOST variable failed."
+          error "nano-shell could not be updated."
+          error "Your original nano-shell script should be intact."
+          error "Please update manually."
+          return 2
+        fi
         mv -f "${NANO_FUNCTIONS_LOCATION}" "${NANO_FUNCTIONS_LOCATION}.old"
         mv -f "${NANO_FUNCTIONS_LOCATION}.new" "${NANO_FUNCTIONS_LOCATION}"
         echo "Script ${NANO_FUNCTIONS_LOCATION} has been replaced with the latest copy. If you have problems, you can find the previous version of the script here: ${NANO_FUNCTIONS_LOCATION}.old"
@@ -1324,8 +1337,9 @@ update_nano_functions() {
 # Desc: NANO_FUNCTIONS_HASH, NODEHOST DEBUG
 # Returns: md5sum of nano-shell
 get_nano_functions_md5sum() {
-  local NANO_FUNCTIONS_HASH=$($GREP -vE '^NANO_FUNCTIONS_HASH=.*$' ${NANO_FUNCTIONS_LOCATION} | $GREP -vE '^NODEHOST=.*$' | $GREP -vE '^DEBUG=.*$' | md5sum)
-  echo "${NANO_FUNCTIONS_HASH:0:32}"
+  local FILE_TO_HASH=${1:-$NANO_FUNCTIONS_LOCATION}
+  local THE_HASH=$($GREP -vE '^NANO_FUNCTIONS_HASH=.*$' ${FILE_TO_HASH} | $GREP -vE '^NODEHOST=.*$' | $GREP -vE '^DEBUG=.*$' | md5sum)
+  echo "${THE_HASH:0:32}"
 }
 
 # Desc: Get the major version of the node
@@ -2154,4 +2168,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=68fea4d40ceab2af794bbda8185fee7d
+NANO_FUNCTIONS_HASH=cc02b213b63384f3cd5cfd4ab144d29b
