@@ -1645,7 +1645,7 @@ generate_spam_sends_to_file() {
   local BLOCKS_TO_CREATE=${BLOCKS_TO_CREATE:-}
   [[ $# -ge 4 ]] && BLOCKS_TO_CREATE=${4:-1}
 
-  [[ ! -e "${BLOCK_STORE:-}" ]] && error "\$block_store_file does not exist and could not be created. Is the location writable?" && return 3
+  [[ ! -e "${BLOCK_STORE:-}" ]] && [[ ! -w $(dirname "${BLOCK_STORE:-}") ]] && error "\$block_store_file does not exist and could not be created. Is the location writable?" && return 3
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "\$blocks_to_create_in_batch should be specified as an integer." && return 3
 
   local CURRENT_BALANCE
@@ -2153,4 +2153,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=72d7f887cb13b491db07d1f2410ee833
+NANO_FUNCTIONS_HASH=00bddc5766daa8609f2a8fbdd70ae7c5
