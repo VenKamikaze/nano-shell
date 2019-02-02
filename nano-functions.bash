@@ -16,6 +16,7 @@ NANO_FUNCTIONS_VERSION=0.95
 #                   - nanonodeninja -> My Nano Ninja (Thanks BitDesert)
 #                   - update_nano_functions will now attempt to reset the NODEHOST variable
 #          - Bugfix
+#                   - send_block takes MNano parameter and converts to raw amount
 #                   - Fix node version checking for RC releases.
 #          - Refactor
 #                   - Reduce dependence on environment vars for spam functions
@@ -1251,6 +1252,17 @@ raw_to_mnano() {
   echo $RET
 }
 
+# Desc: Converts from NANO (MNano) amounts into raw
+# P1: <$mnano_amount_number>
+# P1Desc: The MNano amount to convert into raw
+# Returns: Number (raw amount)
+mnano_to_raw() {
+  local MNANO_AMOUNT=${1:-}
+
+  local RET=$(echo "scale=0; ${MNANO_AMOUNT} * ${ONE_MNANO}" | $BC)
+  echo $RET
+}
+
 # C style return values suck and always confuse me when making shell scripts
 # However, we will make this function return C style exit codes
 # E.g. 1 means error (not an integer) 
@@ -1475,7 +1487,8 @@ send_block() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local NEWBLOCK; local RET=255
   if [[ $# -eq 4 ]]; then
-    NEWBLOCK=$(__create_send_block_privkey $@)
+    local RAW_AMOUNT=$(mnano_to_raw $4)
+    NEWBLOCK=$(__create_send_block_privkey $1 $2 $3 ${RAW_AMOUNT})
     RET=$?
   elif [[ $# -eq 5 ]]; then
     error "NOT YET IMPLEMENTED"
@@ -2168,4 +2181,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=6f53fa90868c7951fd2bab01ecdabdaa
+NANO_FUNCTIONS_HASH=e92bc1e4a8f7d070a837bcdc7b49bceb
