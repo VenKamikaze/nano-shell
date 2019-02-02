@@ -13,6 +13,9 @@ NANO_FUNCTIONS_VERSION=0.95
 # Version: 0.95
 #          - Feature
 #                   - API documentation for functions.
+#                   - nanonodeninja -> My Nano Ninja (Thanks BitDesert)
+#          - Bugfix
+#                   - Fix node version checking for RC releases.
 #
 # Version: 0.9401
 #          - Bugfix
@@ -2150,4 +2153,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=3506d6fb05487e8e6baa603be1b5a6f4
+NANO_FUNCTIONS_HASH=3161a0a5a42c1e0df02f7e80650a08a8
