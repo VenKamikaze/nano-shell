@@ -622,7 +622,7 @@ nano_version_number() {
   local MAJOR_VERSION=
   local MINOR_VERSION=
   if [[ -n "${RET}" ]]; then
-    FULL_VERSION_STRING=$(echo "${RET}" | $GREP -oP '[0-9\.]+')
+    FULL_VERSION_STRING=$(echo "${RET}" | $GREP -oP '\d+(\.\d+)+')
     if [[ "${FULL_VERSION_STRING}" == *\.* ]]; then
       MAJOR_VERSION=$(echo "${FULL_VERSION_STRING}" | $CUT -d'.' -f1)
       MINOR_VERSION=$( (echo "${FULL_VERSION_STRING}" | $CUT -d'.' -f2) && (echo "${FULL_VERSION_STRING}" | $CUT -d'.' -f3) ) # just incase an extra decimal appears
