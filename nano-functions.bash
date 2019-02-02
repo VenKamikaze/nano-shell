@@ -1591,8 +1591,8 @@ generate_spam_and_broadcast_until_stopped() {
 # P4Desc: Note: can be specified in environment variable
 # P4Desc: named BLOCKS_TO_CREATE for backwards compatibility.
 generate_spam_and_broadcast() {
-  [[ $# -ne 3 || $# -ne 4 ]] && error "Invalid parameters
-                    expected: PRIVKEY SOURCE DESTACCOUNT" && return 9
+  [[ $# -lt 3 || $# -gt 4 ]] && error "Invalid parameters
+                    expected: PRIVKEY SRCACCOUNT DESTACCOUNT [BLOCKS_TO_CREATE_IN_BATCH]" && return 9
 
   local BLOCKS_TO_CREATE=${BLOCKS_TO_CREATE:-}
   [[ $# -eq 4 ]] && BLOCKS_TO_CREATE=${4}
@@ -2153,4 +2153,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=3161a0a5a42c1e0df02f7e80650a08a8
+NANO_FUNCTIONS_HASH=72d7f887cb13b491db07d1f2410ee833
