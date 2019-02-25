@@ -8,8 +8,14 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.95
+NANO_FUNCTIONS_VERSION=0.951
 
+# Version: 0.951
+#          - Bugfix
+#                   - When performing block_info and related functions, make sure block exists.
+#          - TODO
+#                   - Check what happens when incorrect accounts etc are specified.
+#
 # Version: 0.95
 #          - Feature
 #                   - API documentation for functions. Access with nano_shell_help <funcname>
@@ -21,14 +27,14 @@ NANO_FUNCTIONS_VERSION=0.95
 #          - Refactor
 #                   - Reduce dependence on environment vars for spam functions
 #
-# Version: 0.9401
-#          - Bugfix
-#                   - Update help text for send_block (thanks https://github.com/Laurentiu-Andronache)
-#
 #
 # Last Changed By: M. Saunders
 
 # -------------------------------
+# Version: 0.9401
+#          - Bugfix
+#                   - Update help text for send_block (thanks https://github.com/Laurentiu-Andronache)
+#
 # Version: 0.94
 #          - Feature
 #                   - Improve dependency checking
@@ -799,10 +805,18 @@ search_pending() {
 # P1: <$hash>
 # P1Desc: The block hash to retrieve detail about
 # Returns: JSON from the node RPC
+# Returns: Also returns C style function return code
+# Returns: RETVAL is 1 if error (block not found)
+# Returns: or 0 if success (block found)
 block_info() {
   local HASH=${1:-}
   local RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
+  RETVAL=0
+  if [[ -n $(echo "$RET" | $GREP error) ]]; then
+    RETVAL=1
+  fi
   echo $RET
+  return $RETVAL
 }
 
 # Desc: Get the block hash immediately before the given one
@@ -810,11 +824,18 @@ block_info() {
 # P1: <$hash>
 # P1Desc: The block hash to retrieve the predecessor for
 # Returns: Hash
+# Returns: Also returns C style function return code
+# Returns: RETVAL is 1 if error (block not found)
+# Returns: or 0 if success (block found)
 block_info_previous_hash() {
   local HASH=${1:-}
-  local FULL_INFO=$(block_info "${HASH}")
+  local FULL_INFO; local RETVAL
+  FULL_INFO=$(block_info "${HASH}")
+  RETVAL=$?
+  [[ $RETVAL -ne 0 ]] && echo "$FULL_INFO" && return $RETVAL
   local PREV_HASH=$(echo "$FULL_INFO" | $GREP previous | $GREP -oP 'previous\\":\s\\"(.*?)\\"' | $CUT -d'"' -f3 | $GREP -oP '[A-F0-9]+')
   echo $PREV_HASH
+  return 0
 }
 
 # Desc: Get the balance of the account that published block
@@ -824,9 +845,15 @@ block_info_previous_hash() {
 # P1: <$hash>
 # P1Desc: The block hash to 
 # Returns: Number (account balance)
+# Returns: Also returns C style function return code
+# Returns: RETVAL is 1 if error (block not found)
+# Returns: or 0 if success (block found)
 block_info_account_balance() {
   local HASH=${1:-}
-  local FULL_INFO=$(block_info "${HASH}")
+  local FULL_INFO; local RETVAL
+  FULL_INFO=$(block_info "${HASH}")
+  RETVAL=$?
+  [[ $RETVAL -ne 0 ]] && echo "$FULL_INFO" && return $RETVAL
   echo "$FULL_INFO" | $GREP type | $GREP state > /dev/null 2>&1
   local IS_STATE=$?
   [[ 0 -eq $IS_STATE ]] && IS_STATE="Y" || IS_STATE="N"
@@ -850,9 +877,15 @@ block_info_account_balance() {
 # P1: <$hash>
 # P1Desc: The block hash to query
 # Returns: Number (block balance in raw)
+# Returns: Also returns C style function return code
+# Returns: RETVAL is 1 if error (block not found)
+# Returns: or 0 if success (block found)
 block_info_amount() {
   local HASH=${1:-}
-  local PREV_HASH=$(block_info_previous_hash "${HASH}")
+  local PREV_HASH; local RETVAL
+  PREV_HASH=$(block_info_previous_hash "${HASH}")
+  RETVAL=$?
+  [[ $RETVAL -ne 0 ]] && echo "$PREV_HASH" && return $RETVAL
 
   local ACCOUNT_BALANCE_PREV
   if [[ -z "${PREV_HASH}" || "${ZEROES}" == "${PREV_HASH}" ]]; then
@@ -885,9 +918,15 @@ block_info_amount() {
 # P1: <$hash>
 # P1Desc: The block hash to query
 # Returns: Number (block balance in MNano)
+# Returns: Also returns C style function return code
+# Returns: RETVAL is 1 if error (block not found)
+# Returns: or 0 if success (block found)
 block_info_amount_mnano() {
   local HASH=${1:-}
-  local RAW_AMOUNT=$(block_info_amount "${HASH}")
+  local RAW_AMOUNT;local RETVAL
+  RAW_AMOUNT=$(block_info_amount "${HASH}")
+  RETVAL=$?
+  [[ $RETVAL -ne 0 ]] && echo "$RAW_AMOUNT" && return $RETVAL
 
   echo $(raw_to_mnano ${RAW_AMOUNT})
   #local RET=$($CURL -sS -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | $GREP amount | $CUT -d'"' -f4)
@@ -2059,7 +2098,10 @@ __create_receive_block_privkey() {
     CURRENT_BALANCE=0
   fi
 
-  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+  local AMOUNT_IN_BLOCK; local RETVAL
+  AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+  RETVAL=$?
+  [[ $RETVAL -ne 0 ]] && echo "$AMOUNT_IN_BLOCK" && return $RETVAL
 
   local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | $BC)
 
@@ -2181,4 +2223,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=e92bc1e4a8f7d070a837bcdc7b49bceb
+NANO_FUNCTIONS_HASH=c9f24a127b8c7e03d3942710b5937287
