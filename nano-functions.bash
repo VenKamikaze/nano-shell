@@ -2141,7 +2141,13 @@ __create_send_block_privkey() {
   fi  
 
   local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
-  [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+  if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+  elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 65 characters. Got ${REPRESENTATIVE}" && return 11
+  else
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano). Got ${REPRESENTATIVE}" && return 11
+  fi
 
   debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
