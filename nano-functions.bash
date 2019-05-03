@@ -16,6 +16,9 @@ NANO_FUNCTIONS_VERSION=0.99
 #                   - Add dynPoW 'difficulty' option to generate_work
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
+#          - Bugfix
+#                   - Handle return of nano_ prefixed addresses in offline signing functions
+#                   - Fix generate_spam_send_to_file function when empty block store exists already 
 #
 # Last Changed By: M. Saunders
 
@@ -145,6 +148,7 @@ NANO_FUNCTIONS_LOCATION=$(readlink -f ${BASH_SOURCE[0]})
 ZEROES="0000000000000000000000000000000000000000000000000000000000000000"
 ONE_MNANO="1000000000000000000000000000000"
 BURN_ADDRESS="xrb_1111111111111111111111111111111111111111111111111111hifc8npp"
+BURN_ADDRESS_NOPREFIX="${BURN_ADDRESS/xrb_/}"
 
 # Binary dependencies required. Assumed to be on $PATH but will
 #  try a few other locations and set the var appropriately if needed.
@@ -1973,7 +1977,11 @@ __create_open_block_privkey() {
   local PRIVKEY=${1:-}
   local SOURCE=${2:-}
   local DESTACCOUNT=${3:-}
+  local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
+  DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=${ZEROES}
@@ -1998,7 +2006,7 @@ __create_open_block_privkey() {
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+  if [[ "${RET}" != *"\"account\\\": \\\"xrb_${DESTACCOUNT_NOPREFIX}\\\""* && "${RET}" != *"\"account\\\": \\\"nano_${DESTACCOUNT_NOPREFIX}\\\""* ]]; then
     echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
     return 1
   fi
@@ -2006,7 +2014,7 @@ __create_open_block_privkey() {
     echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}" >&2
     return 2
   fi
-  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
     echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
     return 3
   fi
@@ -2049,7 +2057,11 @@ __create_open_block_wallet() {
   local ACCOUNT=${2:-}
   local SOURCE=${3:-}
   local DESTACCOUNT=${4:-}
+  local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
+  DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${5:-}
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=0
@@ -2074,7 +2086,7 @@ __create_open_block_wallet() {
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+  if [[ "${RET}" != *"\"account\\\": \\\"xrb_${DESTACCOUNT_NOPREFIX}\\\""* && "${RET}" != *"\"account\\\": \\\"nano_${DESTACCOUNT_NOPREFIX}\\\""* ]]; then
     echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
     return 1
   fi
@@ -2082,7 +2094,7 @@ __create_open_block_wallet() {
     echo "VALIDATION FAILED: Response did not contain destination accounts new balance after pocketing open block funds: ${NEW_BALANCE}" >&2
     return 2
   fi
-  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
     echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
     return 3
   fi
@@ -2121,6 +2133,8 @@ __create_send_block_privkey() {
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
   local DESTACCOUNT=${3:-}
+  local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
+  DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local AMOUNT_RAW=${4:-}
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
@@ -2141,6 +2155,8 @@ __create_send_block_privkey() {
   fi  
 
   local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
   if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
     error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
   elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
@@ -2159,7 +2175,7 @@ __create_send_block_privkey() {
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"link_as_account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+  if [[ "${RET}" != *"\"link_as_account\\\": \\\"xrb_${DESTACCOUNT_NOPREFIX}\\\""* && "${RET}" != *"\"link_as_account\\\": \\\"nano_${DESTACCOUNT_NOPREFIX}\\\""* ]]; then
     error "VALIDATION FAILED: Response did not contain destination account in link_as_account field: ${DESTACCOUNT}"
     return 1
   fi
@@ -2167,8 +2183,8 @@ __create_send_block_privkey() {
     error "VALIDATION FAILED: Response did not contain correct new balance after sending funds: ${NEW_BALANCE}"
     return 2
   fi
-  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
-    error "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}"
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain destination account representative: ${REPRESENTATIVE}"
     return 3
   fi
 
@@ -2207,14 +2223,24 @@ __create_receive_block_privkey() {
   local PRIVKEY=${1:-}
   local SOURCE=${2:-}
   local DESTACCOUNT=${3:-}
+  local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
+  DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
   local PREVIOUS=${PREVIOUS:-}
 
   [[ -z "$PREVIOUS" ]] && PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account receiving funds had no previous block, or previous block hash is invalid." && return 5
 
   [[ -z "${REPRESENTATIVE}" ]] && REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
-  [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: Representative account for ${DESTACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+  if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+  elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 65 characters. Got ${REPRESENTATIVE}" && return 11
+  else
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano). Got ${REPRESENTATIVE}" && return 11
+  fi
 
   local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
   if [[ -z "$CURRENT_BALANCE" ]]; then
@@ -2240,7 +2266,7 @@ __create_receive_block_privkey() {
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"account\\\": \\\"${DESTACCOUNT}\\\""* ]]; then
+  if [[ "${RET}" != *"\"account\\\": \\\"xrb_${DESTACCOUNT_NOPREFIX}\\\""* && "${RET}" != *"\"account\\\": \\\"nano_${DESTACCOUNT_NOPREFIX}\\\""* ]]; then
     echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
     return 1
   fi
@@ -2248,7 +2274,7 @@ __create_receive_block_privkey() {
     echo "VALIDATION FAILED: Response did not contain destination account new balance after pocketing receive block funds: ${NEW_BALANCE}" >&2
     return 2
   fi
-  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
     echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
     return 3
   fi
@@ -2285,6 +2311,8 @@ __create_changerep_block_privkey() {
   local PRIVKEY=${1:-}
   local SRCACCOUNT=${2:-}
   local REPRESENTATIVE=${3:-}
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account changing representative had no previous block, or previous block hash is invalid." && return 5
@@ -2294,10 +2322,18 @@ __create_changerep_block_privkey() {
     error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null." && return 4
   fi  
 
-  [[ ${#REPRESENTATIVE} -ne 64 ]] && error "VALIDATION FAILED: New representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+  if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
+  elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 65 characters. Got ${REPRESENTATIVE}" && return 11
+  else
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano). Got ${REPRESENTATIVE}" && return 11
+  fi
 
   local OLD_REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
-  [[ "${REPRESENTATIVE}" == "${OLD_REPRESENTATIVE}" ]] && error "VALIDATION FAILED: New and old representative are identical. Ignoring creation of block." && return 12
+  local OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE/xrb_/}"
+  OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE/nano_/}"
+  [[ "${REPRESENTATIVE_NOPREFIX}" == "${OLD_REPRESENTATIVE_NOPREFIX}" ]] && error "VALIDATION FAILED: New and old representative are identical. Ignoring creation of block." && return 12
 
   debug "Changing representative for ${SRCACCOUNT} to ${REPRESENTATIVE} | Existing balance: ${CURRENT_BALANCE}"
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
@@ -2309,7 +2345,7 @@ __create_changerep_block_privkey() {
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
 
-  if [[ "${RET}" != *"\"link_as_account\\\": \\\"${BURN_ADDRESS}\\\""* ]]; then
+  if [[ "${RET}" != *"\"link_as_account\\\": \\\"xrb_${BURN_ADDRESS_NOPREFIX}\\\""* && "${RET}" != *"\"link_as_account\\\": \\\"nano_${BURN_ADDRESS_NOPREFIX}\\\""* ]]; then
     error "VALIDATION FAILED: Response did not contain burn address in link_as_account field: ${BURN_ADDRESS}"
     return 1
   fi
@@ -2317,7 +2353,7 @@ __create_changerep_block_privkey() {
     error "VALIDATION FAILED: Response did not contain correct balance after creating block. Should have shown balance: ${CURRENT_BALANCE}"
     return 2
   fi
-  if [[ "${RET}" != *"\"representative\\\": \\\"${REPRESENTATIVE}\\\""* ]]; then
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
     error "VALIDATION FAILED: Response did not contain new representative: ${REPRESENTATIVE}"
     return 3
   fi
@@ -2347,4 +2383,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=e98c1dd50a6e4b2ba47f5278e699cdee
+NANO_FUNCTIONS_HASH=405c82054b388546b8af709d7a205ea5
