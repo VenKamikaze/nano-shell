@@ -8,8 +8,18 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.951
+NANO_FUNCTIONS_VERSION=0.99
 
+# Version: 0.99
+#          - Feature
+#                   - Adopt a naming standard for function names (WIP)
+#                   - Add dynPoW 'difficulty' option to generate_work
+#          - Refactor
+#                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
+#
+# Last Changed By: M. Saunders
+
+# -------------------------------
 # Version: 0.951
 #          - Bugfix
 #                   - When performing block_info and related functions, make sure block exists.
@@ -27,10 +37,6 @@ NANO_FUNCTIONS_VERSION=0.951
 #          - Refactor
 #                   - Reduce dependence on environment vars for spam functions
 #
-#
-# Last Changed By: M. Saunders
-
-# -------------------------------
 # Version: 0.9401
 #          - Bugfix
 #                   - Update help text for send_block (thanks https://github.com/Laurentiu-Andronache)
@@ -169,6 +175,11 @@ NANO_NODE_VERSION_UNKNOWN=99.99
 PROD_BURN_TX_HASH=ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113
 BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23
 
+DIFFICULTY_WEAK=ffffffb000000000
+DIFFICULTY_NORMAL=ffffffc000000000 # 1x
+DIFFICULTY_STRONG=ffffffcaaaaaa800 # 2x
+DIFFICULTY_VERY_STRONG=ffffffdaaaaaa000
+
 # Desc: (Internal function)
 # Desc: Try to find $PROG on our $PATH, otherwise attempt to find
 # Desc: it in a few common places before giving up...
@@ -258,7 +269,7 @@ check_dependencies() {
 # RPC: block_count
 # Returns: Text and return code (0 is UP, 1 is DOWN)
 is_node_up() {
-  local RET=$(block_count)
+  local RET=$(block_count_rpc)
   [[ "${RET}" == *"count"* ]] && echo "Node is running" && return 0
   error "Your node does not appear to be running. Cannot reach ${NODEHOST}." && return 1
 }
@@ -317,36 +328,9 @@ error() {
 # Desc: Shuts down the nano node
 # RPC: stop
 # Returns: JSON from the node RPC
-stop_node() {
-  local RET=$($CURL -sS -g -d '{ "action": "stop" }' "${NODEHOST}" | $GREP success | $CUT -d'"' -f2)
-  echo $RET
+stop_node_rpc() {
+  $CURL -sS -g -d '{ "action": "stop" }' "${NODEHOST}"
 }
-
-# Desc: Shows bootstrap status
-# Desc: (unstable RPC call - may not be
-# Desc:  available in future version)
-# RPC: bootstrap_status
-# Returns: JSON from the node RPC
-bootstrap_status() {
-  if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
-    error "Node v17.0RC1 and above required to use this RPC call"
-    return 1
-  fi
-  $CURL -sS -g -d '{ "action": "bootstrap_status" }' "${NODEHOST}"
-}
-
-# Desc: Initiates a lazy bootstrapping attempt
-# RPC: bootstrap_lazy
-# Returns: Text (started) or empty if failure
-bootstrap_lazy() {
-  if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
-    error "Node v17.0RC1 and above required to use this RPC call"
-    return 1
-  fi
-  local RET=$($CURL -sS -g -d '{ "action": "bootstrap_lazy" }' "${NODEHOST}" | $GREP started | $CUT -d'"' -f2)
-  echo $RET
-}
-
 
 #######################################
 # Help commands
@@ -475,17 +459,48 @@ __nano_shell_help_parameters() {
 
 # Desc: Show the total circulating supply on the nano network
 # RPC: available_supply
+# Returns: JSON from the node RPC
+available_supply_rpc() {
+  $CURL -sS -g -d '{ "action": "available_supply" }' "${NODEHOST}"
+}
+
+# Desc: Show the total circulating supply on the nano network
+# RPC: available_supply
 # Returns: Number
 available_supply() {
-  local RET=$($CURL -sS -g -d '{ "action": "available_supply" }' "${NODEHOST}" | $GREP available | $CUT -d'"' -f4)
+  local RET=$(available_supply_rpc | $GREP available | $CUT -d'"' -f4)
   echo $RET
 }
 
 # Desc: Show the checked (valid or processed) and unchecked (invalid or queued) total blocks known to the node
 # RPC: block_count
-# Returns: JSON from node RPC
-block_count() {
+# Returns: JSON from the node RPC
+block_count_rpc() {
   $CURL -sS -g -d '{ "action": "block_count" }' "${NODEHOST}"
+}
+
+# Desc: Shows bootstrap status
+# Desc: (unstable RPC call - may not be
+# Desc:  available in future version)
+# RPC: bootstrap_status
+# Returns: JSON from the node RPC
+bootstrap_status_rpc() {
+  if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
+    error "Node v17.0RC1 and above required to use this RPC call"
+    return 1
+  fi
+  $CURL -sS -g -d '{ "action": "bootstrap_status" }' "${NODEHOST}"
+}
+
+# Desc: Initiates a lazy bootstrapping attempt
+# RPC: bootstrap_lazy
+# Returns: JSON from the node RPC
+bootstrap_lazy_rpc() {
+  if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
+    error "Node v17.0RC1 and above required to use this RPC call"
+    return 1
+  fi
+  $CURL -sS -g -d '{ "action": "bootstrap_lazy" }' "${NODEHOST}"
 }
 
 # Desc: Query the public API at the given site to retrieve a block count
@@ -544,38 +559,18 @@ remote_block_count_nanomeltingice() {
   remote_block_count_nanocrawler
 }
 
-# Desc: Query the public API at the given site to retrieve a block count
-# Desc: Note: This call may break if the given site changes the format used
-# Desc: Note:   to display blocks.
-# RPC: (non nano-node, remote call to /blocks/count)
-# Returns: Number (processed blocks)
-remote_block_count_nanowatch() {
-  local RET
-  if [[ "${NANO_NETWORK_TYPE:-}" == "PROD" ]]; then
-    RET=$($CURL -sS -m5 -g "https://api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
-  elif [[ "${NANO_NETWORK_TYPE:-}" == "BETA" ]]; then
-    RET=$($CURL -sS -m5 -g "https://beta.api.nanowat.ch/blocks/count" | $GREP -oP '\"count\"\:\"[0-9]+\"' | $CUT -d'"' -f4)
-  else
-    error "Network type ("${NANO_NETWORK_TYPE}") has no known block explorer at nanowatch. Cannot determine remote block count."
-  fi
-
-  [[ ${#RET} -ne 0 ]] && echo $RET || ( echo 0 && return 1 )
-}
-
 # Desc: Query the public APIs at three different sites and averages the result
-# Desc: Sites: Nano Crawler, My Nano Ninja, Nano Watch
+# Desc: Sites: Nano Crawler, My Nano Ninja
 # Desc: Note: This call may break if the given site(s) change the format used
-# Desc: Note:   to display blocks.
+# Desc: Note:   to display blocks, or if they are offline.
 # RPC: (non nano-node, remote calls to community run block explorers)
 # Returns: Number (processed blocks average from remote APIs)
 remote_block_count() {
-  let GOT_RESULTS=3
+  let GOT_RESULTS=2
   local COUNT1=$(remote_block_count_nanocrawler 2>/dev/null)
   [[ $COUNT1 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   local COUNT2=$(remote_block_count_mynanoninja 2>/dev/null)
   [[ $COUNT2 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
-  local COUNT3=$(remote_block_count_nanowatch 2>/dev/null)
-  [[ $COUNT3 -eq 0 ]] && let GOT_RESULTS=$GOT_RESULTS-1
   
   if [[ 0 -eq $GOT_RESULTS ]]; then
     error "Unable to retrieve a remote block count from a reliable source. Is your network connection OK?"
@@ -583,8 +578,8 @@ remote_block_count() {
   fi
 
   debug "Got $GOT_RESULTS results when attempting to retrieve remote block counts"
-  debug "(${COUNT1:-0}+${COUNT2:-0}+${COUNT3:-0})/${GOT_RESULTS}"
-  let AVG=$(echo "(${COUNT1:-0}+${COUNT2:-0}+${COUNT3:-0})/${GOT_RESULTS}" | $BC)
+  debug "(${COUNT1:-0}+${COUNT2:-0})/${GOT_RESULTS}"
+  let AVG=$(echo "(${COUNT1:-0}+${COUNT2:-0})/${GOT_RESULTS}" | $BC)
   echo $AVG
 }
 
@@ -604,7 +599,7 @@ is_local_and_remote_block_counts_similar() {
   local WITHIN_AMOUNT=${1:-}
   
   local REMOTE_COUNT=$(remote_block_count | $GREP count | $CUT -d'"' -f4)
-  local LOCAL_COUNT=$(block_count | $GREP count | $CUT -d'"' -f4)
+  local LOCAL_COUNT=$(block_count_rpc | $GREP count | $CUT -d'"' -f4)
 
   [[ -z "${WITHIN_AMOUNT}" ]] && WITHIN_AMOUNT=$(echo "scale=0; $REMOTE_COUNT / 10000" | $BC)
 
@@ -620,8 +615,8 @@ is_local_and_remote_block_counts_similar() {
 # Desc: Query the node version and max compatible protocol version
 # Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: version
-# Returns: JSON from node RPC
-nano_version() {
+# Returns: JSON from the node RPC
+version_rpc() {
   $CURL -sS -g -d '{ "action": "version" }' "${NODEHOST}"
 }
 
@@ -630,7 +625,7 @@ nano_version() {
 # RPC: version
 # Returns: Decimal version number (major.minor)
 nano_version_number() {
-  local RET=$(nano_version 2>/dev/null | $GREP node_vendor | $CUT -d'"' -f4)
+  local RET=$(version_rpc 2>/dev/null | $GREP node_vendor | $CUT -d'"' -f4)
   local FULL_VERSION_STRING=
   local MAJOR_VERSION=
   local MINOR_VERSION=
@@ -644,7 +639,7 @@ nano_version_number() {
       MINOR_VERSION=0
     fi
   else
-    debug "Unable to determine nano node version, empty response from nano_version RPC"
+    debug "Unable to determine nano node version, empty response from version_rpc"
     echo "${NANO_NODE_VERSION_UNKNOWN}" && return 1
   fi
   debug "node_vendor: ${RET}. Version string: ${FULL_VERSION_STRING}. Major: ${MAJOR_VERSION}. Minor: ${MINOR_VERSION}"
@@ -655,30 +650,91 @@ nano_version_number() {
 # Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: stats:counters
 # Returns: JSON from node RPC
-nano_statistics() {
+stats_counters_rpc() {
   $CURL -sS -g -d '{ "action": "stats", "type": "counters" }' "${NODEHOST}"
 }
 
 # Desc: Query the nodes known peers
 # Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: peers
-# Returns: JSON from node RPC
-get_peers() {
-  local RET=$($CURL -sS -g -d '{ "action": "peers" }' "${NODEHOST}")
-  echo $RET
+# Returns: JSON from the node RPC
+peers_rpc() {
+  $CURL -sS -g -d '{ "action": "peers" }' "${NODEHOST}"
 }
+
+#######################################
+# Account RPC functions
+#######################################
 
 # Desc: Query the account information for the given nano account
 # Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: account_info:account
 # P1: <$nano_address>
 # P1Desc: The nano account address to query
-# Returns: JSON from node RPC
-get_account_info() {
+# Returns: JSON from the node RPC
+account_info_rpc() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" )
-  echo $RET
+  $CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}"
 }
+
+# Desc: Query the account balance information for the given nano account
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: account_balance:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
+# Returns: JSON from the node RPC
+account_balance_rpc() {
+  local ACCOUNT=${1:-}
+  $CURL -sS -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}"
+}
+
+# Desc: Query the given accounts representative information 
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: account_representative:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
+# Returns: JSON from the node RPC
+account_representative_rpc() {
+  local ACCOUNT=${1:-}
+  $CURL -sS -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}"
+}
+
+# Desc: Query the given accounts public key information
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: account_key:account
+# P1: <$nano_address>
+# P1Desc: The nano account address to query
+# Returns: JSON from the node RPC
+account_key_rpc() {
+  local ACCOUNT=${1:-}
+  $CURL -sS -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}"
+}
+
+# Desc: Adds given number of new accounts to wallet.
+# Desc: This is generated in a deterministic way based on the 
+# Desc: seed associated with your wallet.
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
+# RPC: accounts_create:wallet:count:work
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to create the accounts within
+# P2: <$count>
+# P2Desc: The number of new accounts to generate. Default is 0
+# P3o: <$workgen_boolean>
+# P3Desc: Set to true to enable work generation by default after
+# P3Desc: creating accounts. Default is false.
+# Returns: JSON from node RPC
+accounts_create_rpc() {
+  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  local WALLET=${1:-}
+  local COUNT=${2:-0}
+  local WORKGEN=${3:-false}
+  $CURL -sS -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${NODEHOST}"
+}
+
+
+#######################################
+# Account wrapper functions
+#######################################
 
 # Desc: Query the frontier hash for the given nano account
 # Desc: (e.g. the head block/the most recent transaction known)
@@ -688,7 +744,7 @@ get_account_info() {
 # Returns: Hash
 get_frontier_hash_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP frontier | $CUT -d'"' -f4)
+  local RET=$(account_info_rpc "${ACCOUNT}" | $GREP frontier | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -700,7 +756,7 @@ get_frontier_hash_from_account() {
 # Returns: Number
 get_balance_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "account_info", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP balance | $CUT -d'"' -f4)
+  local RET=$(account_info_rpc "${ACCOUNT}" | $GREP balance | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -711,7 +767,7 @@ get_balance_from_account() {
 # Returns: Number
 get_account_pending() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "account_balance", "account": "'${ACCOUNT}'", "count": 1 }' "${NODEHOST}" | $GREP pending | $CUT -d'"' -f4)
+  local RET=$(account_balance_rpc "${ACCOUNT}" | $GREP pending | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -722,7 +778,7 @@ get_account_pending() {
 # Returns: Nano address
 get_account_representative() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "account_representative", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP representative | $CUT -d'"' -f4)
+  local RET=$(account_representative_rpc "${ACCOUNT}" | $GREP representative | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -733,9 +789,81 @@ get_account_representative() {
 # Returns: Public key
 get_account_public_key() {
   local ACCOUNT=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "account_key", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP key | $CUT -d'"' -f4)
+  local RET=$(account_key_rpc "${ACCOUNT}" | $GREP key | $CUT -d'"' -f4)
   echo $RET
 }
+
+# Desc: Create a single account in given wallet.
+# Desc: Note: enables work generation by default.
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
+# RPC: accounts_create:wallet:count:work
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to create the account within
+# Returns: JSON from node RPC
+account_create() {
+  local WALLET=${1:-}
+  echo $(accounts_create_rpc "${WALLET}" "1" "true")
+}
+
+#######################################
+# Wallet RPC functions
+#######################################
+
+# Desc: Does this particular wallet UUID contain the given nano account
+# RPC: wallet_contains:wallet:account
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to check for the given nano account
+# P2: <$nano_address>
+# P2Desc: The nano account address
+# Returns: JSON from the node RPC
+wallet_contains_rpc() {
+  local WALLET=${1:-}
+  local ACCOUNT=${2:-}
+  $CURL -sS -g -d '{ "action": "wallet_contains", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'" }' "${NODEHOST}"
+}
+
+# Desc: Show all known frontier (head blocks) hash 
+# Desc: paired with account numbers for given wallet UUID
+# RPC: wallet_frontiers:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to check for frontier-account pairs
+# Returns: JSON from the node RPC
+wallet_frontiers_rpc() {
+  local WALLET=${1:-}
+  $CURL -sS -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${NODEHOST}"
+}
+
+# Desc: Show all known pending and received balances on all accounts
+# Desc: for given wallet UUID
+# RPC: wallet_balances:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to check
+# Returns: JSON from the node RPC
+wallet_balances_rpc() {
+  local WALLET=${1:-}
+  $CURL -sS -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}"
+}
+
+# Desc: Creates a new random wallet
+# RPC: wallet_create
+# Returns: JSON from the node RPC
+wallet_create_rpc() {
+  $CURL -sS -g -d '{ "action": "wallet_create" }' "${NODEHOST}"
+}
+
+# Desc: Returns a JSON representation of given wallet
+# RPC: wallet_export:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to export
+# Returns: JSON from the node RPC
+wallet_export_rpc() {
+  local WALLET=${1:-}
+  $CURL -sS -g -d '{ "action": "wallet_export", "wallet": "'${WALLET}'" }' "${NODEHOST}"
+}
+
+#######################################
+# Wallet wrapper functions
+#######################################
 
 # Desc: Does this particular wallet UUID contain the given nano account
 # RPC: wallet_contains:wallet:account
@@ -744,47 +872,78 @@ get_account_public_key() {
 # P2: <$nano_address>
 # P2Desc: The nano account address
 # Returns: Boolean as number (1 true, 0 false)
-wallet_contains() {
+get_wallet_contains() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
-  local RET=$($CURL -sS -g -d '{ "action": "wallet_contains", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4)
+  local RET=$(wallet_contains_rpc "${WALLET}" "${ACCOUNT}" | $GREP exists | $CUT -d'"' -f4)
   echo $RET
 }
 
-# Desc: Show all known frontier (head blocks) hash 
-# Desc: paired with account numbers for given wallet UUID
-# Desc: Returns JSON result directly from node, no parsing/formatting applied.
-# RPC: wallet_frontiers:wallet
-# P1: <$wallet_uuid>
-# P1Desc: The wallet UUID to check for frontier-account pairs
-# Returns: JSON from node RPC
-wallet_frontiers() {
-  local WALLET=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "wallet_frontiers", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
+# Desc: Creates a new random wallet
+# RPC: wallet_create
+# Returns: Wallet UUID
+wallet_create() {
+  local RET=$(wallet_create_rpc | $GREP wallet | $CUT -d'"' -f4)
   echo $RET
 }
 
-# Desc: Show all known pending and received balances on all accounts
-# Desc: for given wallet UUID
-# Desc: Returns JSON result directly from node, no parsing/formatting applied.
-# RPC: wallet_balances:wallet
-# P1: <$wallet_uuid>
-# P1Desc: The wallet UUID to check
-# Returns: JSON from node RPC
-wallet_balances() {
-  local WALLET=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}" )
-  echo $RET
+#######################################
+# Block info RPC functions
+#######################################
+
+# Desc: Determine if block with given hash is pending
+# RPC: pending_exists:hash
+# P1: <$hash>
+# P1Desc: The block hash to check
+# Returns: JSON from the node RPC
+pending_exists_rpc() {
+  local HASH=${1:-}
+  $CURL -sS -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}"
 }
+
+# Desc: Tells the node to search for any pending blocks for 
+# Desc: any account within the given wallet
+# RPC: search_pending:wallet
+# P1: <$wallet_uuid>
+# P1Desc: The wallet to scan
+# Returns: JSON from the node RPC
+search_pending_rpc() {
+  local WALLET=${1:-}
+  $CURL -sS -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${NODEHOST}"
+}
+
+# Desc: Get full block information for the given block hash
+# RPC: block:hash
+# P1: <$hash>
+# P1Desc: The block hash to retrieve detail about
+# Returns: JSON from the node RPC
+# Returns: Also returns C style function return code
+# Returns: Return code is 1 if error (block not found)
+# Returns: or 0 if success (block found)
+block_info_rpc() {
+  local HASH=${1:-}
+  local RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
+  RETVAL=0
+  if [[ -n $(echo "$RET" | $GREP error) ]]; then
+    RETVAL=1
+  fi
+  echo $RET
+  return $RETVAL
+}
+
+
+#######################################
+# Block info wrapper functions
+#######################################
 
 # Desc: Determine if block with given hash is pending
 # RPC: pending_exists:hash
 # P1: <$hash>
 # P1Desc: The block hash to check
 # Returns: Boolean as number (1 true, 0 false)
-pending_exists() {
+get_pending_exists() {
   local HASH=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "pending_exists", "hash": "'${HASH}'" }' "${NODEHOST}" | $GREP exists | $CUT -d'"' -f4 )
+  local RET=$(pending_exists_rpc "${HASH}" | $GREP exists | $CUT -d'"' -f4 )
   echo $RET
 }
 
@@ -796,27 +955,8 @@ pending_exists() {
 # Returns: Boolean as number (1 true, 0 false) indicating if searching has started
 search_pending() {
   local WALLET=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "search_pending", "wallet": "'${WALLET}'" }' "${NODEHOST}" | $GREP started | $CUT -d'"' -f4 )
+  local RET=$(search_pending_rpc "${WALLET}" | $GREP started | $CUT -d'"' -f4 )
   echo $RET
-}
-
-# Desc: Get full block information for the given block hash
-# RPC: block:hash
-# P1: <$hash>
-# P1Desc: The block hash to retrieve detail about
-# Returns: JSON from the node RPC
-# Returns: Also returns C style function return code
-# Returns: RETVAL is 1 if error (block not found)
-# Returns: or 0 if success (block found)
-block_info() {
-  local HASH=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
-  RETVAL=0
-  if [[ -n $(echo "$RET" | $GREP error) ]]; then
-    RETVAL=1
-  fi
-  echo $RET
-  return $RETVAL
 }
 
 # Desc: Get the block hash immediately before the given one
@@ -830,7 +970,7 @@ block_info() {
 block_info_previous_hash() {
   local HASH=${1:-}
   local FULL_INFO; local RETVAL
-  FULL_INFO=$(block_info "${HASH}")
+  FULL_INFO=$(block_info_rpc "${HASH}")
   RETVAL=$?
   [[ $RETVAL -ne 0 ]] && echo "$FULL_INFO" && return $RETVAL
   local PREV_HASH=$(echo "$FULL_INFO" | $GREP previous | $GREP -oP 'previous\\":\s\\"(.*?)\\"' | $CUT -d'"' -f3 | $GREP -oP '[A-F0-9]+')
@@ -851,7 +991,7 @@ block_info_previous_hash() {
 block_info_account_balance() {
   local HASH=${1:-}
   local FULL_INFO; local RETVAL
-  FULL_INFO=$(block_info "${HASH}")
+  FULL_INFO=$(block_info_rpc "${HASH}")
   RETVAL=$?
   [[ $RETVAL -ne 0 ]] && echo "$FULL_INFO" && return $RETVAL
   echo "$FULL_INFO" | $GREP type | $GREP state > /dev/null 2>&1
@@ -933,68 +1073,6 @@ block_info_amount_mnano() {
 }
 
 #######################################
-# Wallet commands
-#######################################
-
-# Desc: Creates a new random wallet
-# RPC: wallet_create
-# Returns: Wallet UUID
-wallet_create() {
-  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
-  local RET=$($CURL -sS -g -d '{ "action": "wallet_create" }' "${NODEHOST}" | $GREP wallet | $CUT -d'"' -f4)
-  echo $RET
-}
-
-# Desc: Returns a JSON representation of given wallet
-# RPC: wallet_export:wallet
-# P1: <$wallet_uuid>
-# P1Desc: The wallet UUID to export
-# Returns: JSON from node RPC
-wallet_export() {
-  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
-  local WALLET=${1:-}
-  $CURL -sS -g -d '{ "action": "wallet_export", "wallet": "'${WALLET}'" }' "${NODEHOST}"
-}
-
-#######################################
-# Accounts commands
-#######################################
-
-# Desc: Adds given number of new accounts to wallet.
-# Desc: This is generated in a deterministic way based on the 
-# Desc: seed associated with your wallet.
-# RPC: accounts_create:wallet:count:work
-# P1: <$wallet_uuid>
-# P1Desc: The wallet UUID to create the accounts within
-# P2: <$count>
-# P2Desc: The number of new accounts to generate
-# P3o: <$workgen_boolean>
-# P3Desc: Set to true to enable work generation by default after
-# P3Desc: creating accounts. Default is false.
-# Returns: JSON from node RPC
-accounts_create() {
-  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
-  local WALLET=${1:-}
-  local COUNT=${2:-0}
-  local WORKGEN=${3:-false}
-  local RET=$($CURL -sS -g -d '{ "action": "accounts_create", "wallet": "'${WALLET}'", "count": "'${COUNT}'", "work": "'${WORKGEN}'" }' "${NODEHOST}")
-  echo $RET
-}
-
-# Desc: Create a single account in given wallet.
-# Desc: Note: enables work generation by default.
-# RPC: accounts_create:wallet:count:work
-# P1: <$wallet_uuid>
-# P1Desc: The wallet UUID to create the account within
-# Returns: JSON from node RPC
-account_create() {
-  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
-  local WALLET=${1:-}
-  echo $(accounts_create "${WALLET}" "1" "true")
-}
-
-
-#######################################
 # SEED commands
 #######################################
 
@@ -1009,17 +1087,22 @@ account_create() {
 # on an untrusted environment, then it is not recommended to use ANY function below that takes a seed.
 # Doing so may expose your seed, which could lead to loss of funds.
 
+#######################################
+# SEED RPC functions
+#######################################
+
 # Desc: Change the seed associated with the given wallet UUID
 # Desc: into the given seed.
 # Desc: WARNING: Do not use this function on a shared server
 # Desc: your seed could be exposed.
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
 # RPC: wallet_change_seed:wallet:seed
 # P1: <$wallet_uuid>
 # P1Desc: The wallet UUID you wish to associate with the seed
 # P2: <$seed>
 # P2Desc: The seed in plaintext. 
 # Returns: JSON from the node RPC
-wallet_change_seed_text() {
+wallet_change_seed_text_rpc() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
     error "Invalid parameters
@@ -1029,14 +1112,18 @@ wallet_change_seed_text() {
 
   local WALLET=${1:-}
   local SEED=${2:-}
-  local RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
-  echo $RET
+  local RET; local RETVAL
+  RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
+  RETVAL=$?
+  echo "${RET}"
+  return $RETVAL
 }
 
 # Desc: Change the seed associated with the given wallet UUID
 # Desc: into the given seed, sourced from a file.
 # Desc: WARNING: Do not use this function on a shared server
 # Desc: your seed could be exposed.
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
 # RPC: wallet_change_seed:wallet:seed
 # P1: <$wallet_uuid>
 # P1Desc: The wallet UUID you wish to associate with the seed
@@ -1076,6 +1163,7 @@ JSON
 # Desc: and their public/private keys on the seed.
 # Desc: WARNING: Do not use this function on a shared server
 # Desc: your seed could be exposed.
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
 # RPC: deterministic_key:seed:index
 # P1: <$seed>
 # P1Desc: The seed as text.
@@ -1103,6 +1191,7 @@ query_deterministic_keys_text() {
 # Desc: and their public/private keys on the seed.
 # Desc: WARNING: Do not use this function on a shared server
 # Desc: your seed could be exposed.
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
 # RPC: deterministic_key:seed:index
 # P1: <$seed_file>
 # P1Desc: The file containing your plaintext seed. The
@@ -1144,17 +1233,42 @@ JSON
 # P2o: <$use_peers>
 # P2Desc: Can be set to 0 (false) to prevent farming
 # P2Desc: off the work generation to any work peers
+# P3o: <$difficulty_descriptive_text_or_hex>
+# P3Desc: Set the PoW difficulty (V19+ only)
+# P3Desc: You can either specify the value in hexadecimal
+# P3Desc:   as per the normal node RPC
+# P3Desc: OR you can use a built-in value from nano-shell, one of:
+# P3Desc:   weak, normal, strong, very_strong
+# P3Desc: Defaults to ffffffc000000000 or 'normal'
 # Returns: Text (the work signature)
 generate_work() {
   local FRONTIER=${1:-}
   [[ -z "${FRONTIER}" ]] && echo Need a frontier && return 1
   local RET; local RETVAL
   local TRY_TO_USE_WORK_PEERS=${2:-1}  #on by default, can be disabled by passing '0' to this function
+  local WORK_DIFFICULTY_VALUE="${3:-${DIFFICULTY_NORMAL}}"
   local USE_PEERS=
+  local WORK_DIFFICULTY=
   if [[ $(is_version_equal_or_greater 14 0) == "true" && 1 -eq ${TRY_TO_USE_WORK_PEERS} ]]; then
     USE_PEERS=", \"use_peers\": \"true\""
   fi
-  local RET=$($CURL -sS -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' }' "${NODEHOST}" | $GREP work| $CUT -d'"' -f4)
+  if [[ $(is_version_equal_or_greater 19 0) != "true" ]]; then
+    if [[ ${#WORK_DIFFICULTY_VALUE} != 16 ]]; then
+      if [[ "${WORK_DIFFICULTY_VALUE}" == "weak" ]]; then
+        WORK_DIFFICULTY_VALUE="${DIFFICULTY_WEAK}"
+        # "normal" is default, so do not include here
+      elif [[ "${WORK_DIFFICULTY_VALUE}" == "strong" ]]; then
+        WORK_DIFFICULTY_VALUE="${DIFFICULTY_STRONG}"
+      elif [[ "${WORK_DIFFICULTY_VALUE}" == "very_strong" ]]; then
+        WORK_DIFFICULTY_VALUE="${DIFFICULTY_VERY_STRONG}"
+      else
+        error "Difficulty value ${WORK_DIFFICULTY_VALUE} is not a valid value. Ignoring"
+      fi
+    fi
+    WORK_DIFFICULTY=", \"difficulty\": \"${WORK_DIFFICULTY_VALUE}\""
+  fi
+
+  local RET=$($CURL -sS -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' '${WORK_DIFFICULTY}' }' "${NODEHOST}" | $GREP work| $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -1510,6 +1624,7 @@ open_block() {
 
 # Desc: Create and broadcast a send block
 # Desc: (state) on the nano network
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
 # g1P1: <$private_key>
 # g1P1Desc: The private key of the broadcasting account
 # g1P2: <$account>
@@ -1718,14 +1833,17 @@ generate_spam_sends_to_file() {
   local CURRENT_BALANCE
   local PREVIOUS_BLOCK_HASH
   if [[ -f "${BLOCK_STORE}" ]]; then
-    if [[ -f "${BLOCK_STORE}.hash" ]]; then
-      echo "File ${BLOCK_STORE} exists, and associated hash file exists. Getting last block hash, will continue generating from that point."
-      PREVIOUS_BLOCK_HASH=$($TAIL -n1 "${BLOCK_STORE}.hash")
-      CURRENT_BALANCE=$($TAIL -n1 "${BLOCK_STORE}" | $GREP -oP '\\"balance\\"\:\s{0,}\\"[0-9]+' | $CUT -d'"' -f4)
-      [[ ${#PREVIOUS_BLOCK_HASH} -ne 64 ]] && error "Previous block hash from file ${BLOCK_STORE}.hash was not a valid hash" && return 4
-      [[ -z ${CURRENT_BALANCE} ]] && error "Balance in last generated block in ${BLOCK_STORE} was not found." && return 5
-    else
-      error "File ${BLOCK_STORE} exists, but not associated hash file exists. You should remove ${BLOCK_STORE} before using this function." && return 6
+    local STORE_SIZE=$($WC -c <"${BLOCK_STORE}")
+    if [[ 0 -lt ${STORE_SIZE:-0} ]]; then
+      if [[ -f "${BLOCK_STORE}.hash" ]]; then
+        echo "File ${BLOCK_STORE} exists, and associated hash file exists. Getting last block hash, will continue generating from that point."
+        PREVIOUS_BLOCK_HASH=$($TAIL -n1 "${BLOCK_STORE}.hash")
+        CURRENT_BALANCE=$($TAIL -n1 "${BLOCK_STORE}" | $GREP -oP '\\"balance\\"\:\s{0,}\\"[0-9]+' | $CUT -d'"' -f4)
+        [[ ${#PREVIOUS_BLOCK_HASH} -ne 64 ]] && error "Previous block hash from file ${BLOCK_STORE}.hash was not a valid hash" && return 4
+        [[ -z ${CURRENT_BALANCE} ]] && error "Balance in last generated block in ${BLOCK_STORE} was not found." && return 5
+      else
+        error "File ${BLOCK_STORE} exists, but not associated hash file exists. You should remove ${BLOCK_STORE} before using this function." && return 6
+      fi
     fi
   fi
 
@@ -2223,4 +2341,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=c9f24a127b8c7e03d3942710b5937287
+NANO_FUNCTIONS_HASH=7969b71a7684954aca0fc8c2e83fc95a
