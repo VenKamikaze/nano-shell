@@ -14,6 +14,7 @@ NANO_FUNCTIONS_VERSION=0.99
 #          - Feature
 #                   - Adopt a naming standard for function names (WIP)
 #                   - Add dynPoW 'difficulty' option to generate_work
+#                   - Add password_change_rpc, password_enter_rpc RPC
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
 #          - Bugfix
@@ -846,6 +847,34 @@ wallet_frontiers_rpc() {
 wallet_balances_rpc() {
   local WALLET=${1:-}
   $CURL -sS -g -d '{ "action": "wallet_balances", "wallet": "'${WALLET}'" }' "${NODEHOST}"
+}
+
+# Desc: Change the password for the wallet to password
+# Desc: for given wallet UUID
+# RPC: password_change:wallet:password
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to alter the password 
+# P2: <$password_as_text>
+# P2Desc: The password to set for $wallet_uuid
+# Returns: JSON from the node RPC
+password_change_rpc() {
+  local WALLET=${1:-}
+  local PASSWORD=${2:-}
+  $CURL -sS -g -d '{ "action": "password_change", "wallet": "'${WALLET}'", "password": "'${PASSWORD}'" }' "${NODEHOST}"
+}
+
+# Desc: Unlock the wallet with the password 
+# Desc: for given wallet UUID
+# RPC: password_enter:wallet:password
+# P1: <$wallet_uuid>
+# P1Desc: The wallet UUID to unlock
+# P2: <$password_as_text>
+# P2Desc: The password to use to unlock $wallet_uuid
+# Returns: JSON from the node RPC
+password_enter_rpc() {
+  local WALLET=${1:-}
+  local PASSWORD=${2:-}
+  $CURL -sS -g -d '{ "action": "password_enter", "wallet": "'${WALLET}'", "password": "'${PASSWORD}'" }' "${NODEHOST}"
 }
 
 # Desc: Creates a new random wallet
