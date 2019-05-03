@@ -2262,9 +2262,15 @@ __create_send_block_privkey() {
   debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" '${WORK}' }'
 
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" '${WORK}' }' "${NODEHOST}" 2>/dev/null)
+  local RETVAL; local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "key": "${PRIVKEY}", "account": "${SRCACCOUNT}", "link": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}", "representative": "${REPRESENTATIVE}" ${WORK} }
+JSON
+)
+  RETVAL=$?
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
+  debug " Return code: $RETVAL"
   debug "$RET"
   debug "------------------"
   DEBUG_FULL_RESPONSE="$RET"
