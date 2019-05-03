@@ -14,7 +14,10 @@ NANO_FUNCTIONS_VERSION=0.99
 #          - Feature
 #                   - Adopt a naming standard for function names (WIP)
 #                   - Add dynPoW 'difficulty' option to generate_work
+#                   - Add parameter to generate_spam funcs for work difficulty (WIP)
+#                   - Add parameter to __create_send_block func for work difficulty (WIP)
 #                   - Add password_change_rpc, password_enter_rpc RPC
+#                   - Add key_expand_text_rpc
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
 #          - Bugfix
@@ -1203,7 +1206,7 @@ JSON
 # P2: <$index>
 # P2Desc: The number of accounts to show
 # Returns: JSON from the node RPC
-query_deterministic_keys_text() {
+deterministic_keys_rpc_text() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
     error "Invalid parameters
@@ -1233,7 +1236,7 @@ query_deterministic_keys_text() {
 # P2: <$index>
 # P2Desc: The number of accounts to show
 # Returns: JSON from the node RPC
-query_deterministic_keys() {
+deterministic_keys_rpc() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   if [[ $# -ne 2 ]]; then
     error "Invalid parameters
@@ -1252,6 +1255,28 @@ JSON
 )
   RETVAL=$?
   echo "${RET}"
+  return $RETVAL
+}
+
+# Desc: Shows associated public key and account with given private key
+# Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
+# RPC: key_expand
+# P1: <$private_key>
+# P1Desc: The private key to view account and public key.
+# Returns: JSON from the node RPC
+key_expand_rpc() {
+  [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
+  if [[ $# -ne 1 ]]; then
+    error "Invalid parameters
+    expected: PRIVATE_KEY"
+    return 9
+  fi
+
+  local RET; local RETVAL
+  local KEY=${1:-}
+  RET=$($CURL -sS -g -d '{ "action": "key_expand", "key": "'${KEY}'" }' "${NODEHOST}")
+  RETVAL=$?
+  echo $RET
   return $RETVAL
 }
 
@@ -1285,7 +1310,7 @@ generate_work() {
   if [[ $(is_version_equal_or_greater 14 0) == "true" && 1 -eq ${TRY_TO_USE_WORK_PEERS} ]]; then
     USE_PEERS=", \"use_peers\": \"true\""
   fi
-  if [[ $(is_version_equal_or_greater 19 0) != "true" ]]; then
+  if [[ $(is_version_equal_or_greater 19 0) == "true" ]]; then
     if [[ ${#WORK_DIFFICULTY_VALUE} != 16 ]]; then
       if [[ "${WORK_DIFFICULTY_VALUE}" == "weak" ]]; then
         WORK_DIFFICULTY_VALUE="${DIFFICULTY_WEAK}"
@@ -1301,8 +1326,18 @@ generate_work() {
     WORK_DIFFICULTY=", \"difficulty\": \"${WORK_DIFFICULTY_VALUE}\""
   fi
 
-  local RET=$($CURL -sS -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' '${WORK_DIFFICULTY}' }' "${NODEHOST}" | $GREP work| $CUT -d'"' -f4)
-  echo $RET
+  debug 'work_generate'
+  debug '{ "action": "work_generate", "hash": "'${FRONTIER}'" '${USE_PEERS}' '${WORK_DIFFICULTY}' }'
+  local RETVAL; local RET=
+#  RET=$($CURL -sS -g -d '{ "action": "work_generate", "hash": "'${FRONTIER}'" "'${USE_PEERS}'" '${WORK_DIFFICULTY}' }' "${NODEHOST}" | $GREP work| $CUT -d'"' -f4)
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "work_generate", "hash": "${FRONTIER}" ${USE_PEERS} ${WORK_DIFFICULTY} }
+JSON
+)
+  RETVAL=$?
+  debug 'Got back result: '"$RET"
+  echo $RET | $GREP work | $CUT -d'"' -f4
+  return $RETVAL
 }
 
 # Desc: Broadcast the given JSON block to the network
@@ -1779,12 +1814,18 @@ changerep_block() {
 # P4Desc: If not specified, will attempt to use
 # P4Desc: the value set in the environment variable
 # P4Desc: named BLOCKS_TO_CREATE, otherwise defaults to 1
+# P5o: <$work_difficulty>
+# P5Desc: The work difficulty to use (dynPoW) for the spam
+# P5Desc: Can be either a 16 character hexadecimal string
+# P5Desc: Or use inbuilt values from nano-shell:
+# P5Desc:   weak, normal, strong, very_strong
 generate_spam_and_broadcast_until_stopped() {
   local PREGENERATE_BLOCKS_NUMBER=${4:-1}
-  [[ -n "${BLOCKS_TO_CREATE}" && $# -ne 4 ]] && PREGENERATE_BLOCKS_NUMBER=${BLOCKS_TO_CREATE}
+  local WORK_DIFFICULTY=${5:-$DIFFICULTY_NORMAL}
+  [[ -n "${BLOCKS_TO_CREATE}" && $# -lt 4 ]] && PREGENERATE_BLOCKS_NUMBER=${BLOCKS_TO_CREATE}
 
   while true; do
-    generate_spam_and_broadcast $1 $2 $3 ${PREGENERATE_BLOCKS_NUMBER}
+    generate_spam_and_broadcast $1 $2 $3 ${PREGENERATE_BLOCKS_NUMBER} ${WORK_DIFFICULTY}
     [[ $? -ne 0 ]] && error "Call to generate_spam_and_broadcast failed. Aborting infinite loop and exiting..." && return 1
   done
 }
@@ -1804,17 +1845,23 @@ generate_spam_and_broadcast_until_stopped() {
 # P4Desc: then send all 5.
 # P4Desc: Note: can be specified in environment variable
 # P4Desc: named BLOCKS_TO_CREATE for backwards compatibility.
+# P5o: <$work_difficulty>
+# P5Desc: The work difficulty to use (dynPoW) for the spam
+# P5Desc: Can be either a 16 character hexadecimal string
+# P5Desc: Or use inbuilt values from nano-shell:
+# P5Desc:   weak, normal, strong, very_strong
 generate_spam_and_broadcast() {
-  [[ $# -lt 3 || $# -gt 4 ]] && error "Invalid parameters
-                    expected: PRIVKEY SRCACCOUNT DESTACCOUNT [BLOCKS_TO_CREATE_IN_BATCH]" && return 9
+  [[ $# -lt 3 || $# -gt 5 ]] && error "Invalid parameters
+                    expected: PRIVKEY SRCACCOUNT DESTACCOUNT [BLOCKS_TO_CREATE_IN_BATCH] [WORK_DIFFICULTY]" && return 9
 
   local BLOCKS_TO_CREATE=${BLOCKS_TO_CREATE:-}
-  [[ $# -eq 4 ]] && BLOCKS_TO_CREATE=${4}
+  [[ $# -ge 4 ]] && BLOCKS_TO_CREATE=${4}
+  local WORK_DIFFICULTY=${5:-$DIFFICULTY_NORMAL}
 
   [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "Please set the environment variable BLOCKS_TO_CREATE (integer) before calling this method." && return 3
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$($MKTEMP --tmpdir block_store_temp.XXXXX)
 
-  generate_spam_sends_to_file $1 $2 $3 ${BLOCKS_TO_CREATE}
+  generate_spam_sends_to_file $1 $2 $3 ${WORK_DIFFICULTY} ${BLOCKS_TO_CREATE}
   [[ $? -ne 0 ]] && error "Error in function. Aborting and removing ${BLOCK_STORE}." && $RM -f "${BLOCK_STORE}" && return 1
 
   send_pre-generated_blocks
@@ -1832,36 +1879,42 @@ generate_spam_and_broadcast() {
 # P2Desc: The sending account address
 # P3: <$dest_account_address>
 # P3Desc: The destination account address
-# P4o: <$blocks_to_create_in_batch>
-# P4Desc: The number of blocks to generate per batch
-# P4Desc: e.g. if set to 5, it will generate 5 blocks
-# P4Desc: This parameter can also be specified in environment variable
-# P4Desc: named BLOCKS_TO_CREATE for backwards compatibility.
-# P4Desc: If not specified, will default to 1
-# P5o: <$block_store_file>
-# P5Desc: The file that will contain the blocks generated
-# P5Desc: If this file already exists and the associated
-# P5Desc: $block_store_file.hash file also exists
-# P5Desc: then nano-shell will resume generating blocks
-# P5Desc: from the last block+hash generated in the file.
+# P4o: <$work_difficulty>
+# P4Desc: The work difficulty to use (dynPoW) for the spam
+# P4Desc: Can be either a 16 character hexadecimal string
+# P4Desc: Or use inbuilt values from nano-shell:
+# P4Desc:   weak, normal, strong, very_strong
+# P5o: <$blocks_to_create_in_batch>
+# P5Desc: The number of blocks to generate per batch
+# P5Desc: e.g. if set to 5, it will generate 5 blocks
 # P5Desc: This parameter can also be specified in environment variable
-# P5Desc: named BLOCK_STORE for backwards compatibility.
-# P5Desc: If not specified, will default to your $TMPDIR
-# P5Desc: in a file named 'block_store_temp.XXXXX'
+# P5Desc: named BLOCKS_TO_CREATE for backwards compatibility.
+# P5Desc: If not specified, will default to 1
+# P6o: <$block_store_file>
+# P6Desc: The file that will contain the blocks generated
+# P6Desc: If this file already exists and the associated
+# P6Desc: $block_store_file.hash file also exists
+# P6Desc: then nano-shell will resume generating blocks
+# P6Desc: from the last block+hash generated in the file.
+# P6Desc: This parameter can also be specified in environment variable
+# P6Desc: named BLOCK_STORE for backwards compatibility.
+# P6Desc: If not specified, will default to your $TMPDIR
+# P6Desc: in a file named 'block_store_temp.XXXXX'
 generate_spam_sends_to_file() {
-  [[ $# -lt 3 || $# -gt 5 ]] && error "Invalid parameters
-                    expected: PRIVKEY SOURCE DESTACCOUNT [BLOCKS_TO_CREATE_IN_BATCH] [BLOCK_STORE_FILE]" && return 9
+  [[ $# -lt 3 || $# -gt 6 ]] && error "Invalid parameters
+                    expected: PRIVKEY SOURCE DESTACCOUNT [WORK_DIFFICULTY] [BLOCKS_TO_CREATE_IN_BATCH] [BLOCK_STORE_FILE]" && return 9
 
-  debug "generate_spam_sends_to_file 1=$1 2=$2 3=$3 4=$4 5=$5"
+  debug "generate_spam_sends_to_file 1=$1 2=$2 3=$3 4=$4 5=$5 6=$6"
   local BLOCK_STORE="${BLOCK_STORE:-}"
-  [[ $# -eq 5 ]] && BLOCK_STORE="${5:-}"
+  local WORK_DIFFICULTY=${4:-$DIFFICULTY_NORMAL}
+  [[ $# -eq 6 ]] && BLOCK_STORE="${6:-}"
   [[ -z "${BLOCK_STORE}" ]] && BLOCK_STORE=$($MKTEMP --tmpdir block_store_temp.XXXXX)
 
   local BLOCKS_TO_CREATE=${BLOCKS_TO_CREATE:-}
-  [[ $# -ge 4 ]] && BLOCKS_TO_CREATE=${4:-1}
+  [[ $# -gt 4 ]] && BLOCKS_TO_CREATE=${5:-1}
 
   [[ ! -e "${BLOCK_STORE:-}" ]] && [[ ! -w $(dirname "${BLOCK_STORE:-}") ]] && error "\$block_store_file does not exist and could not be created. Is the location writable?" && return 3
-  [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "\$blocks_to_create_in_batch should be specified as an integer." && return 3
+  [[ -z "${BLOCKS_TO_CREATE}" || "false" == $(is_integer "${BLOCKS_TO_CREATE}") ]] && error "\$blocks_to_create_in_batch should be specified as an integer. Got value ${BLOCKS_TO_CREATE} " && return 3
 
   local CURRENT_BALANCE
   local PREVIOUS_BLOCK_HASH
@@ -1887,7 +1940,7 @@ generate_spam_sends_to_file() {
 
     local PREVIOUS="${PREVIOUS_BLOCK_HASH}"
     local IGNORE_BLOCK_COUNT_CHECK=1
-    __generate_spam_send_to_file $1 $2 $3
+    __generate_spam_send_to_file $1 $2 $3 ${WORK_DIFFICULTY}
     [[ $? -ne 0 ]] && error "Bombing out due to error in generate_spam_send_to_file" && return 1
 
     $PRINTF "\rCreated %${#BLOCKS_TO_CREATE}d blocks" "$((idx+1))"
@@ -1908,13 +1961,23 @@ generate_spam_sends_to_file() {
 # P2Desc: The sending account address
 # P3: <$dest_account_address>
 # P3Desc: The destination account address
+# P4o: <$work_difficulty>
+# P4Desc: The work difficulty (dynPoW)
 __generate_spam_send_to_file() {
   [[ -z "${BLOCK_STORE:-}" ]] && error "Please set the environment variable BLOCK_STORE before calling this method." && return 3
 
-  if [[ $# -eq 3 ]]; then
+  if [[ $# -gt 2 && $# -lt 5 ]]; then
     
+    local WORK_RESULT=
+    if [[ "${WORK_DIFFICULTY}" != "${DIFFICULTY_NORMAL}" && "${WORK_DIFFICULTY}" != "normal" ]]; then
+      local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${2})}
+      [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account sending funds had no previous block, or previous block hash is invalid." && return 5
+      WORK_RESULT=$(generate_work ${PREVIOUS} 1 ${WORK_DIFFICULTY}) 
+      debug "Work result=${WORK_RESULT}"
+    fi
+
     # Send one RAW
-    __create_send_block_privkey $@ 1 >/dev/null
+    __create_send_block_privkey $1 $2 $3 1 $WORK_RESULT >/dev/null
     if [[ ${#BLOCK_HASH} -eq 64 ]]; then
       debug "Block generated, got hash ${BLOCK_HASH}. Storing block in ${BLOCK_STORE}."
       echo "${BLOCK}" >> "${BLOCK_STORE}"
@@ -2010,7 +2073,7 @@ __create_open_block_privkey() {
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=${ZEROES}
@@ -2044,6 +2107,7 @@ __create_open_block_privkey() {
     return 2
   fi
   if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
+    debug "repnoprefix: ${REPRESENTATIVE_NOPREFIX}"
     echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
     return 3
   fi
@@ -2090,7 +2154,7 @@ __create_open_block_wallet() {
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${5:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=0
@@ -2152,7 +2216,9 @@ __create_open_block_wallet() {
 # P3: <$dest_account_address>
 # P3Desc: The destination account to receive the funds
 # P4: <$amount_raw>
-# P4Desc: The amount of nano (RAW) to send.
+# P4Desc: The amount of nano (RAW) to send
+# P5o: <$work_value>
+# P5Desc: The pre-generated work value to use for this block
 # RPC: account_info:account
 # RPC: block:hash
 # RPC: account_representative:account
@@ -2165,6 +2231,9 @@ __create_send_block_privkey() {
   local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local AMOUNT_RAW=${4:-}
+  local WORK_VALUE=${5:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account sending funds had no previous block, or previous block hash is invalid." && return 5
@@ -2185,15 +2254,15 @@ __create_send_block_privkey() {
 
   local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
   if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
     error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
   fi
 
   debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
-  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" '${WORK}' }'
 
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}" 2>/dev/null)
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" '${WORK}' }' "${NODEHOST}" 2>/dev/null)
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2252,7 +2321,7 @@ __create_receive_block_privkey() {
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
   local PREVIOUS=${PREVIOUS:-}
 
   [[ -z "$PREVIOUS" ]] && PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
@@ -2333,7 +2402,7 @@ __create_changerep_block_privkey() {
   local SRCACCOUNT=${2:-}
   local REPRESENTATIVE=${3:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account changing representative had no previous block, or previous block hash is invalid." && return 5
@@ -2349,7 +2418,7 @@ __create_changerep_block_privkey() {
 
   local OLD_REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
   local OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE/xrb_/}"
-  OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE/nano_/}"
+  OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE_NOPREFIX/nano_/}"
   [[ "${REPRESENTATIVE_NOPREFIX}" == "${OLD_REPRESENTATIVE_NOPREFIX}" ]] && error "VALIDATION FAILED: New and old representative are identical. Ignoring creation of block." && return 12
 
   debug "Changing representative for ${SRCACCOUNT} to ${REPRESENTATIVE} | Existing balance: ${CURRENT_BALANCE}"
@@ -2400,4 +2469,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=01e39d878c3b9e37dd5e456c61ab0061
+NANO_FUNCTIONS_HASH=6b14010d3756d6704b3416e387768cc4
