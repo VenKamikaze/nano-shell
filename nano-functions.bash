@@ -2157,12 +2157,8 @@ __create_send_block_privkey() {
   local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
   REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/nano_/}"
-  if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
-  elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 65 characters. Got ${REPRESENTATIVE}" && return 11
-  else
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano). Got ${REPRESENTATIVE}" && return 11
+  if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
   fi
 
   debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
@@ -2234,12 +2230,8 @@ __create_receive_block_privkey() {
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account receiving funds had no previous block, or previous block hash is invalid." && return 5
 
   [[ -z "${REPRESENTATIVE}" ]] && REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
-  if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
-  elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 65 characters. Got ${REPRESENTATIVE}" && return 11
-  else
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano). Got ${REPRESENTATIVE}" && return 11
+  if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
   fi
 
   local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
@@ -2322,12 +2314,8 @@ __create_changerep_block_privkey() {
     error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null." && return 4
   fi  
 
-  if [[ ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -ne 64 ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 64 characters. Got ${REPRESENTATIVE}" && return 11
-  elif [[ ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -ne 65 ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} should be 65 characters. Got ${REPRESENTATIVE}" && return 11
-  else
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano). Got ${REPRESENTATIVE}" && return 11
+  if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
   fi
 
   local OLD_REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
@@ -2383,4 +2371,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=405c82054b388546b8af709d7a205ea5
+NANO_FUNCTIONS_HASH=01e39d878c3b9e37dd5e456c61ab0061
