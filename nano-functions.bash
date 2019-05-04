@@ -13,17 +13,22 @@ NANO_FUNCTIONS_VERSION=0.99
 # Version: 0.99
 #          - Feature
 #                   - Adopt a naming standard for function names (WIP)
-#                   - Add dynPoW 'difficulty' option to generate_work
-#                   - Add parameter to generate_spam funcs for work difficulty (WIP)
-#                   - Add parameter to __create_send_block func for work difficulty (WIP)
+#                   - Add dynPoW 'difficulty' option to generate_work and send_block
+#                   - Add parameter to generate_spam funcs for work difficulty
+#                   - Add parameter to __create_send_block func for work difficulty
+#                   - Add __create_send_block_wallet alternative function
+#                   - send_block wrapper can route to appropriate internal __create_send_block function
 #                   - Add password_change_rpc, password_enter_rpc RPC
 #                   - Add key_expand_text_rpc
 #                   - Add work_validate_rpc (UNTESTED)
+#                   - Add optional 'subtype' field for process_rpc / broadcast_block
+#                   - Use optional 'subtype' field for process_rpc / broadcast_block for most internal calls
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
 #          - Bugfix
 #                   - Handle return of nano_ prefixed addresses in offline signing functions
 #                   - Fix generate_spam_send_to_file function when empty block store exists already 
+#                   - Fix parameter group parsing in nano_shell_help functions
 #
 # Last Changed By: M. Saunders
 
@@ -364,9 +369,10 @@ nano_shell_help() {
     echo "${SEP_H}"
   else
     debug "Showing detailed help for function named: ${FUNCTIONAL_HELP}"
-    local GENERALISED_BEFORE=$($GREP -B30 -E "^(${FUNCTIONAL_HELP})\(\)\s*.*$" "${NANO_FUNCTIONS_LOCATION}")
+    local GENERALISED_BEFORE=$($GREP -B50 -E "^(${FUNCTIONAL_HELP})\(\)\s*.*$" "${NANO_FUNCTIONS_LOCATION}")
     [[ -z "${GENERALISED_BEFORE}" ]] && echo "No function matching ${FUNCTIONAL_HELP} found." && return 1
     local DETAIL=$(__nano_shell_help_detail "${GENERALISED_BEFORE}")
+    debug "Got detail $DETAIL (END DETAIL)"
     echo "${SEP_H}"
     echo "Function Name: ${FUNCTIONAL_HELP}"
     echo "${SEP_B}"
@@ -441,13 +447,16 @@ __nano_shell_help_parameters() {
         PARAM_VALUES=$(trim $(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}[o]*:\s*\(.*\)/  \1/p"))
         [[ -z "${PARAM_VALUES}" ]] && break
         PARAM_DESC=$(echo "${DETAIL}" | $SED -n "s/^#\sg${PARAM_POS}P${PARAM_POS2}Desc:\s*\(.*\)/  \1/p")
-        [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS}) Parameter is OPTIONAL" || echo " (${PARAM_POS}) Parameter is MANDATORY"
-        echo " (${PARAM_POS}) Valid values: ${PARAM_VALUES} "
-        echo " (${PARAM_POS}) Description: "
+        [[ -n "${PARAM_IS_OPTIONAL}" ]] && echo " (${PARAM_POS2}) Parameter is OPTIONAL" || echo " (${PARAM_POS2}) Parameter is MANDATORY"
+        echo " (${PARAM_POS2}) Valid values: ${PARAM_VALUES} "
+        echo " (${PARAM_POS2}) Description: "
         echo "${PARAM_DESC}"
       done
       echo "${SEP_B}"
-      [[ -z "${PARAM_VALUES}" ]] && break
+      local NEXTGROUP=0
+      let NEXTGROUP=$PARAM_POS+1
+      local NEXT_GROUP_EXISTS=$(echo "${DETAIL}" | $GREP -oE "^#\sg${NEXTGROUP}P1")
+      [[ -z "${NEXT_GROUP_EXISTS}" ]] && break
     else
        PARAM_IS_OPTIONAL=$(echo "${DETAIL}" | $GREP -oE "^#\sP${PARAM_POS}o")
        PARAM_VALUES=$(echo "${DETAIL}" | $SED -n "s/^#\sP${PARAM_POS}[o]*:\s*\(.*\)/  \1/p")
@@ -909,7 +918,7 @@ wallet_export_rpc() {
 # P2: <$nano_address>
 # P2Desc: The nano account address
 # Returns: Boolean as number (1 true, 0 false)
-get_wallet_contains() {
+wallet_contains() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
   local RET=$(wallet_contains_rpc "${WALLET}" "${ACCOUNT}" | $GREP exists | $CUT -d'"' -f4)
@@ -1399,13 +1408,19 @@ JSON
 # RPC: process:block
 # P1: <$json_block>
 # P1Desc: The JSON block to broadcast.
+# P2o: <$subtype>
+# P2Desc: Specify the block sub-type to prevent accidental
+# P2Desc: sends instead of a receive when using state blocks.
 # Returns: JSON from the node RPC.
 process_rpc() {
   local BLOCK="${1:-}"
+  local SUBTYPE="${2:-}"; local SUBTYPE_PARAM=
+  [[ -n "${SUBTYPE}" ]] && SUBTYPE_PARAM=", \"subtype\": \"${SUBTYPE}\""
+  debug "Subtype Param: ${SUBTYPE_PARAM}"
   local RET; local RETVAL
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
   RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
-{ "action": "process", "block": "${BLOCK}" }
+{ "action": "process" ${SUBTYPE_PARAM} , "block": "${BLOCK}" }
 JSON
 )
   RETVAL=$?
@@ -1418,15 +1433,20 @@ JSON
 # RPC: process:block
 # P1: <$json_block>
 # P1Desc: The JSON block to broadcast.
+# P2o: <$subtype>
+# P2Desc: Specify the block sub-type to prevent accidental
+# P2Desc: sends instead of a receive when using state blocks.
 # Returns: Text (block hash) or empty on failure
 broadcast_block() {
+  local BLOCK="${1:-}"
+  local SUBTYPE="${2:-}"
   local RET; local RETVAL
-  RET=$(process_rpc $@)
+  RET=$(process_rpc "${BLOCK}" "${SUBTYPE}")
   RETVAL=$?
   DEBUG_BROADCAST=$RET
   if [[ 0 -eq $RETVAL ]]; then
     local HASH=$(echo "${RET}" | $GREP hash | $CUT -d'"' -f4)
-    [[ -z "${HASH}" ]] && error "No hash value returned in broadcast_block. Block was probably invalid and failed to publish!" && return 1
+    [[ -z "${HASH}" ]] && error "No hash value returned in broadcast_block. Block was probably invalid and failed to publish! Node RPC says: ${RET}" && return 1
     echo $HASH
   else
     error "Non-zero return code ($RETVAL) when using RPC to broadcast block \"${BLOCK}\"."
@@ -1577,7 +1597,7 @@ raw_to_mnano() {
 mnano_to_raw() {
   local MNANO_AMOUNT=${1:-}
 
-  local RET=$(echo "scale=0; ${MNANO_AMOUNT} * ${ONE_MNANO}" | $BC)
+  local RET=$(echo "scale=0; (${MNANO_AMOUNT} * ${ONE_MNANO})/1" | $BC)
   echo $RET
 }
 
@@ -1599,6 +1619,34 @@ mnano_to_raw() {
 is_integer() {
   local INPUT="${1:-}"
   [[ -n ${INPUT//[0-9]/} ]] && echo "false" && return 1
+  echo "true" && return 0
+}
+
+# C style return values suck and always confuse me when making shell scripts
+# However, we will make this function return C style exit codes
+# E.g. 1 means error (not an integer)
+#      0 means success (is an integer)
+# Also add textual booleans for convenience
+
+# Desc: Check if input satisfies criteria
+# Desc: to be a decimal (also works with integer).
+# Desc: Thanks to user 'pixelbeat' in StackOverflow thread:
+# Desc: https://stackoverflow.com/questions/806906/how-do-i-test-if-a-variable-is-a-number-in-bash
+# P1: <$input>
+# P1Desc: The input string to check.
+# Returns: Boolean as string (true) if decimal
+# Returns: or false if not.
+# Returns: Also function return codes are C-style
+# Returns: RETVAL is 1 if error (NaN)
+# Returns: or 0 if success (is decimal)
+is_decimal() {
+  local INPUT="${1:-}"
+  local RESULT; local RETVAL
+  # filter octal/hex/ord()
+  RESULT=$(printf '%s' "${INPUT}" | $SED "s/^0*\([1-9]\)/\1/; s/'/^/")
+  test "$num" && printf '%f' "$num" >/dev/null 2>&1
+  RETVAL=$?
+  [[ 0 -ne $RETVAL ]] && echo "false" && return 1
   echo "true" && return 0
 }
 
@@ -1781,7 +1829,7 @@ open_block() {
   fi
 
   if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
-    broadcast_block "${NEWBLOCK}"
+    broadcast_block "${NEWBLOCK}" "open"
   fi
 }
 
@@ -1790,6 +1838,9 @@ open_block() {
 # Desc: Create and broadcast a send block
 # Desc: (state) on the nano network
 # Desc: Requires environment variable 'NANO_UNSAFE_COMMANDS' to be set to 1
+# Desc: Note: to determine whether the first argument is either <$private_key>
+# Desc: Note: or <$wallet_uuid> the first two parameters are ALWAYS sent to 
+# Desc: Note: the wallet_contains node RPC.
 # g1P1: <$private_key>
 # g1P1Desc: The private key of the broadcasting account
 # g1P2: <$account>
@@ -1800,28 +1851,57 @@ open_block() {
 # g1P4: <$balance_MNano>
 # g1P4Desc: The NANO (MNano) amount to send
 # g1P4Desc: to the $destaccount
+# g1P5o: <$work_signature>
+# g1P5Desc: The pre-computed work value to use for signing
+# g1P5Desc: this block. This will avoid calculating new work
+# g1P5Desc: and will use the value provided in this parameter.
+# g1P5Desc: See 'generate_work' function for getting this value
+# g2P1: <$wallet_uuid>
+# g2P1Desc: The wallet UUID of the sending account
+# g2P2: <$account>
+# g2P2Desc: The broadcasting account (sender)
+# g2P3: <$destaccount>
+# g2P3Desc: The destination account to send 
+# g2P3Desc: the funds to 
+# g2P4: <$balance_MNano>
+# g2P4Desc: The NANO (MNano) amount to send
+# g2P4Desc: to the $destaccount
+# g2P5o: <$work_signature>
+# g2P5Desc: The pre-computed work value to use for signing
+# g2P5Desc: this block. This will avoid calculating new work
+# g2P5Desc: and will use the value provided in this parameter.
+# g2P5Desc: See 'generate_work' function for getting this value
+# RPC: wallet_contains:walletuuid:account
+# RPC: account_info:account
+# RPC: block:hash
+# RPC: account_representative:account
+# RPC: block_create:type:key:account:destination:previous:balance:representative
+# RPC: block_create:type:wallet_uuid:account:destination:previous:balance:representative
 # Returns: Text (block hash) of the broadcast send block
 # Returns: if successful.
 send_block() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local NEWBLOCK; local RET=255
-  if [[ $# -eq 4 ]]; then
+  local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${2}")
+  debug "Group 2 parameters ? ${IS_FIRST_PARAM_WALLET_UUID}"
+
+  if [[ ( $# -eq 4 || $# -eq 5 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 0 ]]; then
     local RAW_AMOUNT=$(mnano_to_raw $4)
-    NEWBLOCK=$(__create_send_block_privkey $1 $2 $3 ${RAW_AMOUNT})
+    NEWBLOCK=$(__create_send_block_privkey $1 $2 $3 ${RAW_AMOUNT} ${5:-})
     RET=$?
-  elif [[ $# -eq 5 ]]; then
-    error "NOT YET IMPLEMENTED"
-    return 10
-    #__send_block_wallet $@
-  else
+  elif [[ ( $# -eq 4 || $# -eq 5 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 1 ]]; then
+    local RAW_AMOUNT=$(mnano_to_raw $4)
+    NEWBLOCK=$(__create_send_block_wallet $1 $2 $3 ${RAW_AMOUNT} ${5:-})
+    RET=$?
+  elif [[ $# -lt 4 || $# -gt 5 ]]; then
     error "Invalid parameters
-    expected: PRIVKEY ACCOUNT DESTACCOUNT BALANCE_IN_MNANO
-          or: WALLETUUID ACCOUNT SOURCE DESTACCOUNT BALANCE_IN_MNANO"
+    expected: PRIVKEY ACCOUNT DESTACCOUNT BALANCE_IN_MNANO [WORK_DIFFICULTY]
+          or: WALLETUUID ACCOUNT DESTACCOUNT BALANCE_IN_MNANO [WORK_DIFFICULTY]"
     return 9
   fi
 
   if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
-    broadcast_block "${NEWBLOCK}"
+    broadcast_block "${NEWBLOCK}" "send"
   fi
 }
 
@@ -1853,7 +1933,7 @@ receive_block() {
   fi
 
   if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
-    broadcast_block "${NEWBLOCK}"
+    broadcast_block "${NEWBLOCK}" "receive"
   fi
 }
 
@@ -1886,7 +1966,7 @@ changerep_block() {
     return 9
   fi
   if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
-    broadcast_block "${NEWBLOCK}"
+    broadcast_block "${NEWBLOCK}" "change"
   fi
 }
 
@@ -2113,6 +2193,7 @@ send_pre-generated_blocks() {
   echo "Beginning broadcast of all pre-generated blocks in ${BLOCK_STORE}: "
 
   while read -r line; do
+    #Not specifying 'subtype' of block here to avoid any slowdowns/checks on the node side.
     HASH=$(broadcast_block "${line}")
     RET=$?
     [[ $RET -ne 0 || -z "${HASH}" ]] && error "Failed to broadcast block at line number ${LINE_NO}. Aborting run." && RET=2 && break
@@ -2315,11 +2396,13 @@ __create_open_block_wallet() {
 # P4: <$amount_raw>
 # P4Desc: The amount of nano (RAW) to send
 # P5o: <$work_value>
-# P5Desc: The pre-generated work value to use for this block
+# P5Desc: Avoid doing a Proof of Work calculation and
+# P5Desc:   instead use the supplied pre-generated work value
+# P5Desc:   for this block.
 # RPC: account_info:account
 # RPC: block:hash
 # RPC: account_representative:account
-# RPC: block_create:type:key:source:destination:previous:balance:representative
+# RPC: block_create:type:key:account:destination:previous:balance:representative
 # Returns: JSON from node RPC (send block)
 __create_send_block_privkey() {
   local PRIVKEY=${1:-}
@@ -2395,6 +2478,107 @@ JSON
   BLOCK=$(strip_block "${TEMPV}")
   echo "$BLOCK"
 }
+
+# Desc: (Internal function)
+# Desc: Creates a send block (state)
+# Desc: to transfer <$amount_raw> from
+# Desc: <$source_account_address> to a <$dest_account_address>
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# Desc: Note: wallet must be unlocked before attempting this.
+# DesC: Note: See 'password_enter_rpc' for unlocking wallet
+# P1: <$wallet_uuid>
+# P1Desc: The sender's wallet UUID associated with $source_account_address
+# P2: <$source_account_address>
+# P2Desc: The account that is sending the funds
+# P3: <$dest_account_address>
+# P3Desc: The destination account to receive the funds
+# P4: <$amount_raw>
+# P4Desc: The amount of nano (RAW) to send
+# P5o: <$work_value>
+# P5Desc: Avoid doing a Proof of Work calculation and
+# P5Desc:   instead use the supplied pre-generated work value
+# P5Desc:   for this block.
+# RPC: account_info:account
+# RPC: block:hash
+# RPC: account_representative:account
+# RPC: block_create:type:key:account:destination:previous:balance:representative
+# Returns: JSON from node RPC (send block)
+__create_send_block_wallet() {
+  local WALLET_UUID=${1:-}
+  local SRCACCOUNT=${2:-}
+  local DESTACCOUNT=${3:-}
+  local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
+  DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
+  local AMOUNT_RAW=${4:-}
+  local WORK_VALUE=${5:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
+
+  local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
+  [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account sending funds had no previous block, or previous block hash is invalid." && return 5
+
+  local CURRENT_BALANCE=${CURRENT_BALANCE:-$(get_balance_from_account ${SRCACCOUNT})}
+  if [[ $(echo "${AMOUNT_RAW} != 0" | $BC) -eq 1 && ( -z "$CURRENT_BALANCE" || $(echo "${CURRENT_BALANCE} == 0" | $BC) -eq 1 ) ]]; then
+    error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null or zero, no funds are available to send." && return 4
+  fi
+
+  if [[ $(echo "${AMOUNT_RAW} > ${CURRENT_BALANCE}" | $BC) -eq 1 ]]; then
+    error "VALIDATION FAILED: You are attempting to send an amount greater than the balance of $SRCACCOUNT." && return 7
+  fi
+
+  local NEW_BALANCE=$(echo "${CURRENT_BALANCE} - ${AMOUNT_RAW}" | $BC)
+  if [[ $(echo "${NEW_BALANCE} > ${CURRENT_BALANCE}" | $BC) -eq 1 ]]; then
+    error "VALIDATION FAILED: Post send balance is greater than existing balance. Are you trying to send a negative amount?." && return 8
+  fi
+
+  local REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
+  fi
+
+  debug "Amount to send: ${AMOUNT_RAW} | Existing balance (${SRCACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET_UUID}'", "account": "'${SRCACCOUNT}'", "link": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'", "representative": "'${REPRESENTATIVE}'" '${WORK}' }'
+
+  local RETVAL; local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "wallet": "${WALLET_UUID}", "account": "${SRCACCOUNT}", "link": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}", "representative": "${REPRESENTATIVE}" ${WORK} }
+JSON
+)
+  RETVAL=$?
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug " Return code: $RETVAL"
+  debug "$RET"
+  debug "------------------"
+  DEBUG_FULL_RESPONSE="$RET"
+
+  if [[ "${RET}" != *"\"link_as_account\\\": \\\"xrb_${DESTACCOUNT_NOPREFIX}\\\""* && "${RET}" != *"\"link_as_account\\\": \\\"nano_${DESTACCOUNT_NOPREFIX}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain destination account in link_as_account field: ${DESTACCOUNT}"
+    return 1
+  fi
+  if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain correct new balance after sending funds: ${NEW_BALANCE}"
+    return 2
+  fi
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain destination account representative: ${REPRESENTATIVE}"
+    return 3
+  fi
+
+  BLOCK_HASH=$(echo "${RET}" | $GREP hash | $GREP -oP ':(.*)' | $CUT -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
+  local TEMPV=$(echo "${RET}" | $GREP block | $GREP -oP ':(.*)')
+  BLOCK=$(strip_block "${TEMPV}")
+  echo "$BLOCK"
+}
+
 
 # Desc: (Internal function)
 # Desc: Creates a receive block (state)
@@ -2572,4 +2756,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=44d2bf31b4edc79a8dc7815a0d4b7a34
+NANO_FUNCTIONS_HASH=579642f1b63f5664943f8f57ce44ecae
