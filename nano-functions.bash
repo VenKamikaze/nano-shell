@@ -18,6 +18,7 @@ NANO_FUNCTIONS_VERSION=0.99
 #                   - Add parameter to __create_send_block func for work difficulty (WIP)
 #                   - Add password_change_rpc, password_enter_rpc RPC
 #                   - Add key_expand_text_rpc
+#                   - Add work_validate_rpc (UNTESTED)
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
 #          - Bugfix
@@ -1300,6 +1301,31 @@ key_expand_rpc() {
 # P3Desc: Defaults to ffffffc000000000 or 'normal'
 # Returns: Text (the work signature)
 generate_work() {
+  local RETVAL; local RET=
+  RET=$(work_generate_rpc $@)
+  RETVAL=$?
+  debug 'Got back result: '"$RET"
+  echo $RET | $GREP work | $CUT -d'"' -f4
+  return $RETVAL
+}
+
+# Desc: Generate the PoW for the given block hash
+# RPC: work_generate:hash:use_peers:difficulty
+# P1: <$hash>
+# P1Desc: The block hash to generate work for.
+# P2o: <$use_peers>
+# P2Desc: Can be set to 0 or false to prevent farming
+# P2Desc: off the work generation to any work peers
+# P2Desc: Defaults to 1 or true
+# P3o: <$difficulty_descriptive_text_or_hex>
+# P3Desc: Set the PoW difficulty (V19+ only)
+# P3Desc: You can either specify the value in hexadecimal
+# P3Desc:   as per the normal node RPC
+# P3Desc: OR you can use a built-in value from nano-shell, one of:
+# P3Desc:   weak, normal, strong, very_strong
+# P3Desc: Defaults to ffffffc000000000 or 'normal'
+# Returns: JSON from the node RPC.
+work_generate_rpc() {
   local FRONTIER=${1:-}
   [[ -z "${FRONTIER}" ]] && echo Need a frontier && return 1
   local RET; local RETVAL
@@ -1307,7 +1333,7 @@ generate_work() {
   local WORK_DIFFICULTY_VALUE="${3:-${DIFFICULTY_NORMAL}}"
   local USE_PEERS=
   local WORK_DIFFICULTY=
-  if [[ $(is_version_equal_or_greater 14 0) == "true" && 1 -eq ${TRY_TO_USE_WORK_PEERS} ]]; then
+  if [[ $(is_version_equal_or_greater 14 0) == "true" && ( 1 -eq ${TRY_TO_USE_WORK_PEERS} || "true" == ${TRY_TO_USE_WORK_PEERS} ) ]]; then
     USE_PEERS=", \"use_peers\": \"true\""
   fi
   if [[ $(is_version_equal_or_greater 19 0) == "true" ]]; then
@@ -1336,7 +1362,55 @@ JSON
 )
   RETVAL=$?
   debug 'Got back result: '"$RET"
-  echo $RET | $GREP work | $CUT -d'"' -f4
+  echo $RET
+  return $RETVAL
+}
+
+# Desc: Validate the work associated with the given block hash
+# Desc: V19RC2+ will also show the work difficulty value.
+# RPC: work_validate:work:hash:difficulty
+# P1: <$work_value>
+# P1Desc: The work signature hash to validate
+# P2: <$block_hash>
+# P2Desc: The block hash to verify the work signature on
+# P3o: <$difficulty>
+# P3Desc: The hexadecimal difficulty string to use as part of the 
+# P3Desc:   work validation. Optional param (if standard difficulty).
+# Returns: JSON from the node RPC.
+work_validate_rpc() {
+  local WORK_VALUE="${1:-}"
+  local BLOCK_HASH="${2:-}"
+  local DIFFICULTY_PARAM; local DIFFICULTY_HEX="${3:-}"
+  local RET; local RETVAL
+  [[ -z "${BLOCK_HASH}" ]] && echo Must provide the BLOCK && return 1
+  [[ -z "${WORK_VALUE}" ]] && echo Must provide the work value to verify && return 1
+  [[ -n "${DIFFICULTY_HEX}" ]] && DIFFICULTY_PARAM=", \"difficulty\": \"${DIFFICULTY_HEX}\""
+
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "work_validate", "work": "${WORK_VALUE}", "hash": "${BLOCK_HASH}" ${DIFFICULTY_PARAM} }
+JSON
+)
+  RETVAL=$?
+  echo $RET
+  return $RETVAL
+}
+
+# Desc: Broadcast the given JSON block to the network
+# RPC: process:block
+# P1: <$json_block>
+# P1Desc: The JSON block to broadcast.
+# Returns: JSON from the node RPC.
+process_rpc() {
+  local BLOCK="${1:-}"
+  local RET; local RETVAL
+  [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "process", "block": "${BLOCK}" }
+JSON
+)
+  RETVAL=$?
+  DEBUG_BROADCAST=$RET
+  echo $RET
   return $RETVAL
 }
 
@@ -1346,13 +1420,8 @@ JSON
 # P1Desc: The JSON block to broadcast.
 # Returns: Text (block hash) or empty on failure
 broadcast_block() {
-  local BLOCK="${1:-}"
   local RET; local RETVAL
-  [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
-  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
-{ "action": "process", "block": "${BLOCK}" }
-JSON
-)
+  RET=$(process_rpc $@)
   RETVAL=$?
   DEBUG_BROADCAST=$RET
   if [[ 0 -eq $RETVAL ]]; then
@@ -1370,11 +1439,38 @@ JSON
 # Desc: (if configured)
 # RPC: work_peers
 # Returns: JSON from the node RPC
+work_peers_rpc() {
+  $CURL -sS -g -d '{ "action": "work_peers" }' "${NODEHOST}"
+}
+
+# Desc: List all associated work peers. These
+# Desc: are peers that help perform PoW operations
+# Desc: (if configured)
+# RPC: work_peers
+# Returns: JSON from the node RPC
+# DEPRECATED: Just wraps work_peers_rpc. May be removed in future version
 work_peer_list() {
+  work_peers_rpc $@
+}
+
+# Desc: Add a work peer to farm out the PoW
+# Desc: operations on the node.
+# RPC: work_peer_add:address:port
+# P1: <$work_peer_address>
+# P1Desc: The work peer IP/host address
+# P2: <$work_peer_port>
+# P2Desc: The work peer port number
+# Returns: JSON from the node RPC.
+work_peer_add_rpc() {
+  local ADDRESS="${1:-}"
+  local PORT=${2:-}
   local RET; local RETVAL
-  RET=$($CURL -sS -g -d '{ "action": "work_peers" }' "${NODEHOST}")
-  RETVAL=$?
-  echo $RET; return $RETVAL
+
+  [[ $# -ne 2 ]] && error "Invalid parameters
+    expected: ADDRESS PORT" && return 9
+  [[ "false" == $(is_integer "${PORT}") ]] && error "Port must be an integer." && return 2
+
+  $CURL -sS -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}"
 }
 
 # Desc: Add a work peer to farm out the PoW
@@ -1386,17 +1482,24 @@ work_peer_list() {
 # P2Desc: The work peer port number
 # Returns: Text (success) or empty on failure.
 work_peer_add() {
-  local ADDRESS="${1:-}"
-  local PORT=${2:-}
-  local RET; local RETVAL
-
-  [[ $# -ne 2 ]] && error "Invalid parameters
-    expected: ADDRESS PORT" && return 9
-  [[ "false" == $(is_integer "${PORT}") ]] && error "Port must be an integer." && return 2
-
-  RET=$($CURL -sS -g -d '{ "action": "work_peer_add", "address": "'${ADDRESS}'", "port": "'${PORT}'" }' "${NODEHOST}")
+  local RETVAL; local RET=
+  RET=$(work_peer_add_rpc $@)
   RETVAL=$?
   [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}, exit code ($RETVAL)." && return 1
+  echo success
+  return 0
+}
+
+
+# Desc: Clear the list of all work peers 
+# Desc: configured on the node.
+# RPC: work_peers_clear
+# Returns: Text (success) or empty on failure.
+work_peer_clear_all() {
+  local RET; local RETVAL
+  RET=$(work_peers_clear_rpc $@)
+  RETVAL=$?
+  [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}, exit code ($RETVAL)." && return 1
 
   echo success
   return 0
@@ -1405,16 +1508,10 @@ work_peer_add() {
 # Desc: Clear the list of all work peers 
 # Desc: configured on the node.
 # RPC: work_peers_clear
-# Returns: Text (success) or empty on failure.
-work_peer_clear_all() {
+# Returns: JSON from the node RPC.
+work_peers_clear_rpc() {
   local RET; local RETVAL
-  RET=$($CURL -sS -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}")
-  RETVAL=$?
-  [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}, exit code ($RETVAL)." && return 1
-
-  echo success
-  return 0
-
+  $CURL -sS -g -d '{ "action": "work_peers_clear" }' "${NODEHOST}"
 }
 #######################################
 # Convenience functions
@@ -2475,4 +2572,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=6b14010d3756d6704b3416e387768cc4
+NANO_FUNCTIONS_HASH=44d2bf31b4edc79a8dc7815a0d4b7a34
