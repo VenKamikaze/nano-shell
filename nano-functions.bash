@@ -13,12 +13,14 @@ NANO_FUNCTIONS_VERSION=0.99
 # Version: 0.99
 #          - Feature
 #                   - Adopt a naming standard for function names (WIP)
-#                   - Add dynPoW 'difficulty' option to generate_work and send_block
+#                   - Add dynPoW 'difficulty' option to generate_work 
+#                   - Add dynPoW 'work_value' option to create/send/receive/open block
 #                   - Add parameter to generate_spam funcs for work difficulty
-#                   - Add parameter to __create_send_block func for work difficulty
 #                   - Add __create_send_block_wallet alternative function
+#                   - Add __create_receive_block_wallet alternative function
+#                   - Add __create_changerep_block_wallet alternative function
 #                   - send_block wrapper can route to appropriate internal __create_send_block function
-#                   - Add password_change_rpc, password_enter_rpc RPC
+#                   - Add password_change_rpc, password_enter_rpc 
 #                   - Add key_expand_text_rpc
 #                   - Add work_validate_rpc (UNTESTED)
 #                   - Add active_difficulty_rpc, active_difficulty_threshold, active_difficulty_active
@@ -32,7 +34,7 @@ NANO_FUNCTIONS_VERSION=0.99
 #                   - Fix generate_spam_send_to_file function when empty block store exists already 
 #                   - Fix parameter group parsing in nano_shell_help functions
 #                   - Avoid swallowing node RPC output when there are errors - output to stderr instead.
-#                   -   TODO: This means a frequent doubling of errors from both stderr and stdout for many functions
+#                   -   FIXME: This means doubling of errors from both stderr and stdout for some functions
 #
 # Last Changed By: M. Saunders
 
@@ -1850,38 +1852,48 @@ is_version_equal_or_greater() {
 # g1P4: <$representative_account>
 # g1P4Desc: The representative to set for the 
 # g1P4Desc: $destaccount
-## g2P1: <$wallet_uuid>
-## g2P1Desc: The wallet UUID to use for broadcasting
-## g2P1Desc: the open block
-## g2P2: <$destaccount>
-## g2P2Desc: The destination account to receive
-## g2P2Desc: the funds into (and open the account)
-## g2P3: <$source_block_hash>
-## g2P3Desc: The source block hash to pocket
-## g2P4: <$destaccount>
-## g2P4Desc: The destination account to receive
-## g2P4Desc: the funds into (and open the account)
-## g2P5: <$representative_account>
-## g2P5Desc: The representative to set for the 
-## g2P5Desc: $destaccount
+# g1P5o: <$work_signature>
+# g1P5Desc: The pre-computed work value to use for signing
+# g1P5Desc: this block. This will avoid calculating new work
+# g1P5Desc: and will use the value provided in this parameter.
+# g1P5Desc: See 'generate_work' function for getting this value
+# g2P1: <$wallet_uuid>
+# g2P1Desc: The wallet id for <$destaccount> that will receive the funds
+# g2P1Desc: and we will create an open block for.
+# g2P2: <$source_block_hash>
+# g2P2Desc: The source block hash to pocket
+# g2P3: <$destaccount>
+# g2P3Desc: The destination account to receive 
+# g2P3Desc: the funds into (and open the account)
+# g2P4: <$representative_account>
+# g2P4Desc: The representative to set for the 
+# g2P4Desc: $destaccount
+# g2P5o: <$work_signature>
+# g2P5Desc: The pre-computed work value to use for signing
+# g2P5Desc: this block. This will avoid calculating new work
+# g2P5Desc: and will use the value provided in this parameter.
+# g2P5Desc: See 'generate_work' function for getting this value
 # RPC: account_info:account
 # RPC: block:hash
 # RPC: block_create:type:key:representative:source:destination:previous:balance
-## RPC: block_create:type:wallet:account:representative:source:destination:previous:balance
+# RPC: or block_create:type:wallet:account:representative:source:destination:previous:balance
 # Returns: Text (block hash) of the broadcast open block
 # Returns: if successful.
 open_block() {
   local NEWBLOCK; local RET=255
-  if [[ $# -eq 4 ]]; then
+  local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${2}" 2>/dev/null)
+  debug "Group 2 parameters ? ${IS_FIRST_PARAM_WALLET_UUID}"
+
+  if [[ ( $# -eq 4 || $# -eq 5 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 0 ]]; then
     NEWBLOCK=$(__create_open_block_privkey $@)
     RET=$?
-  elif [[ $# -eq 5 ]]; then
+  elif [[ $# -eq 4 || $# -eq 5 ]]; then
     NEWBLOCK=$(__create_open_block_wallet $@)
     RET=$?
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE_BLOCK_HASH DESTACCOUNT REPRESENTATIVE
-          or: WALLETUUID ACCOUNT SOURCE_BLOCK_HASH DESTACCOUNT REPRESENTATIVE"
+    expected: PRIVKEY SOURCE_BLOCK_HASH DESTACCOUNT REPRESENTATIVE [WORK_DIFFICULTY]
+          or: WALLETUUID SOURCE_BLOCK_HASH DESTACCOUNT REPRESENTATIVE [WORK_DIFFICULTY]"
     return 9
   fi
 
@@ -1933,7 +1945,7 @@ open_block() {
 # RPC: block:hash
 # RPC: account_representative:account
 # RPC: block_create:type:key:account:destination:previous:balance:representative
-# RPC: block_create:type:wallet_uuid:account:destination:previous:balance:representative
+# RPC: or block_create:type:wallet_uuid:account:destination:previous:balance:representative
 # Returns: Text (block hash) of the broadcast send block
 # Returns: if successful.
 send_block() {
@@ -1965,27 +1977,47 @@ send_block() {
 #Wrapper that calls the appropriate internal __create_receive_block.* methods based on parameters passed in
 # Desc: Create and broadcast a receive block
 # Desc: (state) on the nano network
+# Desc: Note: to determine whether the first argument is either <$private_key>
+# Desc: Note: or <$wallet_uuid> the first two parameters are ALWAYS sent to 
+# Desc: Note: the wallet_contains node RPC.
 # g1P1: <$private_key>
 # g1P1Desc: The private key of the broadcasting account
 # g1P2: <$source_block_hash>
 # g1P2Desc: The block hash to pocket
 # g1P3: <$destaccount>
 # g1P3Desc: The account to receive the funds
+# g1P4o: <$work_signature>
+# g1P4Desc: The pre-computed work value to use for signing
+# g1P4Desc: this block. This will avoid calculating new work
+# g1P4Desc: and will use the value provided in this parameter.
+# g1P4Desc: See 'generate_work' function for getting this value
+# g2P1: <$wallet_uuid>
+# g2P1Desc: The wallet UUID of the sending account
+# g2P2: <$source_block_hash>
+# g2P2Desc: The block hash to pocket
+# g2P3: <$destaccount>
+# g2P3Desc: The account to receive the funds
+# g2P4o: <$work_signature>
+# g2P4Desc: The pre-computed work value to use for signing
+# g2P4Desc: this block. This will avoid calculating new work
+# g2P4Desc: and will use the value provided in this parameter.
+# g2P4Desc: See 'generate_work' function for getting this value
 # Returns: Text (block hash) of the broadcast receive block
 # Returns: if successful.
 receive_block() {
   local NEWBLOCK; local RET=255
-  if [[ $# -eq 3 ]]; then
+  local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${3}" 2>/dev/null)
+  debug "Group 2 parameters ? ${IS_FIRST_PARAM_WALLET_UUID}"
+  if [[ ( $# -eq 3 || $# -eq 4 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 0 ]]; then
     NEWBLOCK=$(__create_receive_block_privkey $@)
     RET=$?
-  elif [[ $# -eq 4 ]]; then
-    error "NOT YET IMPLEMENTED"
-    return 10
-    #__create_receive_block_wallet $@
+  elif [[ $# -eq 3 || $# -eq 4 ]]; then
+    NEWBLOCK=$(__create_receive_block_wallet $@)
+	RET=$?
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE_BLOCK_HASH DESTACCOUNT 
-          or: WALLETUUID ACCOUNT SOURCE_BLOCK_HASH DESTACCOUNT"
+    expected: PRIVKEY SOURCE_BLOCK_HASH DESTACCOUNT [WORK_DIFFICULTY]
+          or: WALLETUUID SOURCE_BLOCK_HASH DESTACCOUNT [WORK_DIFFICULTY]"
     return 9
   fi
 
@@ -2006,20 +2038,38 @@ receive_block() {
 # g1P3: <$representative_account>
 # g1P3Desc: The representative account to set for
 # g1P3Desc: $account
+# g1P4o: <$work_signature>
+# g1P4Desc: The pre-computed work value to use for signing
+# g1P4Desc: this block. This will avoid calculating new work
+# g1P4Desc: and will use the value provided in this parameter.
+# g1P4Desc: See 'generate_work' function for getting this value
+# g2P1: <$wallet_uuid>
+# g2P1Desc: The wallet UUID of the sending account
+# g2P2: <$account>
+# g2P2Desc: The nano account within $wallet_uuid to change the representative of.
+# g2P3: <$representative_account>
+# g2P3Desc: The representative account to set for
+# g2P3Desc: $account
+# g2P4o: <$work_signature>
+# g2P4Desc: The pre-computed work value to use for signing
+# g2P4Desc: this block. This will avoid calculating new work
+# g2P4Desc: and will use the value provided in this parameter.
+# g2P4Desc: See 'generate_work' function for getting this value
 # Returns: Text (block hash) of the broadcast change block
 changerep_block() {
   local NEWBLOCK; local RET=255
-  if [[ $# -eq 3 ]]; then
+  local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${2}" 2>/dev/null)
+  debug "Group 2 parameters ? ${IS_FIRST_PARAM_WALLET_UUID}"
+  if [[ ( $# -eq 3 || $# -eq 4 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 0 ]]; then
     NEWBLOCK=$(__create_changerep_block_privkey $@)
     RET=$?
-  elif [[ $# -eq 4 ]]; then
-    error "NOT YET IMPLEMENTED"
-    return 10
-    #__create_receive_block_wallet $@
+  elif [[ $# -eq 3 || $# -eq 4 ]]; then
+    NEWBLOCK=$(__create_changerep_block_wallet $@)
+    RET=$?
   else
     error "Invalid parameters
-    expected: PRIVKEY SOURCE REPRESENTATIVE 
-          or: WALLETUUID ACCOUNT SOURCE REPRESENTATIVE"
+    expected: PRIVKEY ACCOUNT REPRESENTATIVE [WORK_DIFFICULTY]
+          or: WALLETUUID ACCOUNT REPRESENTATIVE [WORK_DIFFICULTY]"
     return 9
   fi
   if [[ ( 0 -eq $RET && -n "${NEWBLOCK}" ) ]]; then
@@ -2296,19 +2346,26 @@ send_pre-generated_blocks() {
 # P4: <$representative_account>
 # P4Desc: The representative to set for the 
 # P4Desc: newly opened $dest_account_address
+# P5o: <$work_value>
+# P5Desc: Avoid doing a Proof of Work calculation and
+# P5Desc:   instead use the supplied pre-generated work value
+# P5Desc:   for this block.
 # RPC: account_info:account
 # RPC: block:hash
 # RPC: block_create:type:key:representative:source:destination:previous:balance
 # Returns: JSON from node RPC (open block)
 __create_open_block_privkey() {
   local PRIVKEY=${1:-}
-  local SOURCE=${2:-}
+  local SOURCE_BLOCK_HASH=${2:-}
   local DESTACCOUNT=${3:-}
   local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
   REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  local WORK_VALUE=${5:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=${ZEROES}
@@ -2318,15 +2375,23 @@ __create_open_block_privkey() {
     CURRENT_BALANCE=0
   fi
 
-  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE_BLOCK_HASH}")
 
   local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | $BC)
 
   debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
-  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE_BLOCK_HASH}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
-  debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE"
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}" 2>/dev/null | show_errors)
+  debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE_BLOCK_HASH"
+  
+  local RETVAL; local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "key": "${PRIVKEY}", "representative": "${REPRESENTATIVE}", "source": "${SOURCE_BLOCK_HASH}", "destination": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}" ${WORK} }
+JSON
+)
+  echo "$RET" | show_errors >/dev/null
+  RETVAL=$?
+  
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2366,30 +2431,34 @@ __create_open_block_privkey() {
 # Desc: Stores resulting block hash in variable $BLOCK_HASH
 # P1: <$wallet_uuid>
 # P1Desc: The wallet UUID containing the nano address to open
-# P2: <$nano_address>
-# P2Desc: The nano account address to pocket the funds
-# P3: <$source_block_hash>
-# P3Desc: The source block hash to pocket
-# P4: <$dest_account_address>
-# P4Desc: The destination account to receive 
-# P4Desc: the funds into (and open the account)
-# P5: <$representative_account>
-# P5Desc: The representative to set for the 
-# P5Desc: newly opened $dest_account_address
+# P2: <$source_block_hash>
+# P2Desc: The source block hash to pocket
+# P3: <$dest_account_address>
+# P3Desc: The destination account to receive 
+# P3Desc: the funds into (and open the account)
+# P4: <$representative_account>
+# P4Desc: The representative to set for the 
+# P4Desc: newly opened $dest_account_address
+# P5o: <$work_value>
+# P5Desc: Avoid doing a Proof of Work calculation and
+# P5Desc:   instead use the supplied pre-generated work value
+# P5Desc:   for this block.
 # RPC: account_info:account
 # RPC: block:hash
 # RPC: block_create:type:wallet:account:representative:source:destination:previous:balance
 # Returns: JSON from node RPC (open block)
 __create_open_block_wallet() {
   local WALLET=${1:-}
-  local ACCOUNT=${2:-}
-  local SOURCE=${3:-}
-  local DESTACCOUNT=${4:-}
+  local SOURCE_BLOCK_HASH=${2:-}
+  local DESTACCOUNT=${3:-}
   local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
-  local REPRESENTATIVE=${5:-}
+  local REPRESENTATIVE=${4:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
   REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  local WORK_VALUE=${5:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
 
   local PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
   [[ -z "$PREVIOUS" ]] && PREVIOUS=0
@@ -2399,15 +2468,23 @@ __create_open_block_wallet() {
     CURRENT_BALANCE=0
   fi
 
-  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE}")
+  local AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE_BLOCK_HASH}")
 
   local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | $BC)
 
   debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
-  debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
+  debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${DESTACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE_BLOCK_HASH}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
-  debug "About to open account $ACCOUNT with state block by receiving block $SOURCE"
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}" 2>/dev/null | show_errors)
+  debug "About to open account $ACCOUNT with state block by receiving block $SOURCE_BLOCK_HASH"
+  
+  local RETVAL; local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "wallet": "${WALLET}", "account": "${DESTACCOUNT}", "representative": "${REPRESENTATIVE}", "source": "${SOURCE_BLOCK_HASH}", "destination": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}" ${WORK} }
+JSON
+)
+  echo "$RET" | show_errors >/dev/null
+  RETVAL=$?
+  
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2654,6 +2731,10 @@ JSON
 # P3Desc: The destination account to receive the funds
 # P4o: <$representative>
 # P4Desc: The representative for <$dest_account_address>
+# P5o: <$work_value>
+# P5Desc: Avoid doing a Proof of Work calculation and
+# P5Desc:   instead use the supplied pre-generated work value
+# P5Desc:   for this block.
 # RPC: account_info:account
 # RPC: account_representative:account
 # RPC: block:hash
@@ -2668,6 +2749,9 @@ __create_receive_block_privkey() {
   local REPRESENTATIVE=${4:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
   REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  local WORK_VALUE=${5:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
   local PREVIOUS=${PREVIOUS:-}
 
   [[ -z "$PREVIOUS" ]] && PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
@@ -2695,7 +2779,15 @@ __create_receive_block_privkey() {
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to generate state receive block for $DESTACCOUNT by receiving block $SOURCE"
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}" 2>/dev/null | show_errors)
+  
+  local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "key": "${PRIVKEY}", "representative": "${REPRESENTATIVE}", "source": "${SOURCE}", "destination": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}" ${WORK} }
+JSON
+)
+  echo $RET | show_errors >/dev/null
+  RETVAL=$?
+  
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2727,6 +2819,111 @@ __create_receive_block_privkey() {
 }
 
 # Desc: (Internal function)
+# Desc: Creates a receive block (state)
+# Desc: to pocket funds found in <$source_block_hash>
+# Desc: to <$account>
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# Desc: Note: wallet must be unlocked before attempting this.
+# DesC: Note: See 'password_enter_rpc' for unlocking wallet
+# P1: <$wallet_uuid>
+# P1Desc: The sender's wallet UUID associated with $source_account_address
+# P2: <$source_block_hash>
+# P2Desc: The existing block hash on the network that
+# P2Desc: contains the funds to pocket
+# P3: <$account>
+# P3Desc: The destination account to receive the funds
+# P4o: <$representative>
+# P4Desc: The representative for <$account>
+# P5o: <$work_value>
+# P5Desc: Avoid doing a Proof of Work calculation and
+# P5Desc:   instead use the supplied pre-generated work value
+# P5Desc:   for this block.
+# RPC: account_info:account
+# RPC: account_representative:account
+# RPC: block:hash
+# RPC: block_create:type:key:representative:source:destination:previous:balance
+# Returns: JSON from node RPC (receive block)
+__create_receive_block_wallet() {
+  local WALLET_UUID=${1:-}
+  local SOURCE_BLOCK_HASH=${2:-}
+  local DESTACCOUNT=${3:-}
+  local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
+  DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
+  local REPRESENTATIVE=${4:-}
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  local WORK_VALUE=${5:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
+  local PREVIOUS=${PREVIOUS:-}
+
+  [[ -z "$PREVIOUS" ]] && PREVIOUS=$(get_frontier_hash_from_account ${DESTACCOUNT})
+  [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account receiving funds had no previous block, or previous block hash is invalid." && return 5
+
+  [[ -z "${REPRESENTATIVE}" ]] && REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
+  if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
+  fi
+
+  local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    [[ "${PREVIOUS}" != "${ZEROES}" ]] && echo "VALIDATION FAILED: Balance for ${DESTACCOUNT} returned null, yet previous hash was non-zero." && return 4
+    CURRENT_BALANCE=0
+  fi
+
+  local AMOUNT_IN_BLOCK; local RETVAL
+  AMOUNT_IN_BLOCK=$(block_info_amount "${SOURCE_BLOCK_HASH}")
+  RETVAL=$?
+  [[ $RETVAL -ne 0 ]] && echo "$AMOUNT_IN_BLOCK" && return $RETVAL
+
+  local NEW_BALANCE=$(echo "${CURRENT_BALANCE} + ${AMOUNT_IN_BLOCK}" | $BC)
+
+  debug "Amount in block: ${AMOUNT_IN_BLOCK} | Existing balance (${DESTACCOUNT}): ${CURRENT_BALANCE} | New balance will be: ${NEW_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET_UUID}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE_BLOCK_HASH}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
+
+  debug "About to generate state receive block for $DESTACCOUNT by receiving block $SOURCE_BLOCK_HASH"
+  
+  local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "wallet": "${WALLET_UUID}", "account": "${DESTACCOUNT}", "representative": "${REPRESENTATIVE}", "source": "${SOURCE}", "destination": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}" ${WORK} }
+JSON
+)
+  echo $RET | show_errors >/dev/null
+  RETVAL=$?
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug "$RET"
+  debug "------------------"
+  DEBUG_FULL_RESPONSE="$RET"
+
+  if [[ "${RET}" != *"\"account\\\": \\\"xrb_${DESTACCOUNT_NOPREFIX}\\\""* && "${RET}" != *"\"account\\\": \\\"nano_${DESTACCOUNT_NOPREFIX}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination account to pocket open block funds: ${DESTACCOUNT}" >&2
+    return 1
+  fi
+  if [[ "${RET}" != *"\"balance\\\": \\\"${NEW_BALANCE}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination account new balance after pocketing receive block funds: ${NEW_BALANCE}" >&2
+    return 2
+  fi
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
+    echo "VALIDATION FAILED: Response did not contain destination accounts representative: ${REPRESENTATIVE}" >&2
+    return 3
+  fi
+
+  BLOCK_HASH=$(echo "${RET}" | $GREP hash | $GREP -oP ':(.*)' | $CUT -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
+  local TEMPV=$(echo "${RET}" | $GREP block | $GREP -oP ':(.*)')
+  BLOCK=$(strip_block "${TEMPV}")
+  echo "$BLOCK"
+}
+
+
+
+# Desc: (Internal function)
 # Desc: Creates a change representative block (state)
 # Desc: for <$dest_account_address>
 # Desc: but does not broadcast it to the network
@@ -2739,6 +2936,10 @@ __create_receive_block_privkey() {
 # P3: <$representative>
 # P3Desc: The representative to set
 # P3Desc: for <$dest_account_address>
+# P4o: <$work_value>
+# P4Desc: Avoid doing a Proof of Work calculation and
+# P4Desc:   instead use the supplied pre-generated work value
+# P4Desc:   for this block.
 # RPC: account_info:account
 # RPC: account_representative:account
 # RPC: block_create:type:key:account:link:previous:balance:representative
@@ -2749,6 +2950,9 @@ __create_changerep_block_privkey() {
   local REPRESENTATIVE=${3:-}
   local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
   REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  local WORK_VALUE=${4:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
 
   local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
   [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account changing representative had no previous block, or previous block hash is invalid." && return 5
@@ -2770,7 +2974,14 @@ __create_changerep_block_privkey() {
   debug "Changing representative for ${SRCACCOUNT} to ${REPRESENTATIVE} | Existing balance: ${CURRENT_BALANCE}"
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
 
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}" 2>/dev/null| show_errors)
+  local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "key": "${PRIVKEY}", "account": "${SRCACCOUNT}", "link": "${ZEROES}", "previous": "${PREVIOUS}", "balance": "${CURRENT_BALANCE}", "representative": "${REPRESENTATIVE}" ${WORK} }
+JSON
+)
+  echo $RET | show_errors >/dev/null
+  RETVAL=$?
+
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2801,6 +3012,99 @@ __create_changerep_block_privkey() {
   echo "$BLOCK"
 }
 
+# Desc: (Internal function)
+# Desc: Creates a change representative block (state)
+# Desc: for <$account>
+# Desc: but does not broadcast it to the network
+# Desc: Stores resulting block hash in variable $BLOCK_HASH
+# Desc: Note: wallet must be unlocked before attempting this.
+# DesC: Note: See 'password_enter_rpc' for unlocking wallet
+# P1: <$wallet_uuid>
+# P1Desc: The sender's wallet UUID associated with $source_account_address
+# P2: <$account>
+# P2Desc: The nano account address in <$wallet_uuid> to change
+# P2Desc: the representative to <$representative>.
+# P3: <$representative>
+# P3Desc: The representative to set
+# P3Desc: for <$account>
+# P4o: <$work_value>
+# P4Desc: Avoid doing a Proof of Work calculation and
+# P4Desc:   instead use the supplied pre-generated work value
+# P4Desc:   for this block.
+# RPC: account_info:account
+# RPC: account_representative:account
+# RPC: block_create:type:key:account:link:previous:balance:representative
+# Returns: JSON from node RPC (change representative block)
+__create_changerep_block_wallet() {
+  local WALLET_UUID=${1:-}
+  local SRCACCOUNT=${2:-}
+  local REPRESENTATIVE=${3:-}
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
+  local WORK_VALUE=${4:-}
+  local WORK=
+  [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
+
+  local PREVIOUS=${PREVIOUS:-$(get_frontier_hash_from_account ${SRCACCOUNT})}
+  [[ "${#PREVIOUS}" -ne 64 ]] && error "VALIDATION FAILED: Account changing representative had no previous block, or previous block hash is invalid." && return 5
+
+  local CURRENT_BALANCE=${CURRENT_BALANCE:-$(get_balance_from_account ${SRCACCOUNT})}
+  if [[ -z "$CURRENT_BALANCE" ]]; then
+    error "VALIDATION FAILED: Balance for ${SRCACCOUNT} returned null." && return 4
+  fi  
+
+  if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
+    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
+  fi
+
+  local OLD_REPRESENTATIVE=$(get_account_representative "${SRCACCOUNT}")
+  local OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE/xrb_/}"
+  OLD_REPRESENTATIVE_NOPREFIX="${OLD_REPRESENTATIVE_NOPREFIX/nano_/}"
+  [[ "${REPRESENTATIVE_NOPREFIX}" == "${OLD_REPRESENTATIVE_NOPREFIX}" ]] && error "VALIDATION FAILED: New and old representative are identical. Ignoring creation of block." && return 12
+
+  debug "Changing representative for ${SRCACCOUNT} to ${REPRESENTATIVE} | Existing balance: ${CURRENT_BALANCE}"
+  debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
+
+  local RET=
+  RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+  { "action": "block_create", "type": "state", "wallet": "${WALLET_UUID}", "account": "${SRCACCOUNT}", "link": "${ZEROES}", "previous": "${PREVIOUS}", "balance": "${CURRENT_BALANCE}", "representative": "${REPRESENTATIVE}" ${WORK} }
+JSON
+)
+  echo $RET | show_errors >/dev/null
+  RETVAL=$?
+
+  debug "UNPUBLISHED BLOCK FULL RESPONSE:"
+  debug "------------------"
+  debug "$RET"
+  debug "------------------"
+  DEBUG_FULL_RESPONSE="$RET"
+
+  if [[ "${RET}" != *"\"link_as_account\\\": \\\"xrb_${BURN_ADDRESS_NOPREFIX}\\\""* && "${RET}" != *"\"link_as_account\\\": \\\"nano_${BURN_ADDRESS_NOPREFIX}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain burn address in link_as_account field: ${BURN_ADDRESS}"
+    return 1
+  fi
+  if [[ "${RET}" != *"\"balance\\\": \\\"${CURRENT_BALANCE}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain correct balance after creating block. Should have shown balance: ${CURRENT_BALANCE}"
+    return 2
+  fi
+  if [[ "${RET}" != *"\"representative\\\": \\\"xrb_${REPRESENTATIVE_NOPREFIX}\\\""* && "${RET}" != *"\"representative\\\": \\\"nano_${REPRESENTATIVE_NOPREFIX}\\\""* ]]; then
+    error "VALIDATION FAILED: Response did not contain new representative: ${REPRESENTATIVE}"
+    return 3
+  fi
+
+  BLOCK_HASH=$(echo "${RET}" | $GREP hash | $GREP -oP ':(.*)' | $CUT -d'"' -f2)
+  debug "UNPUBLISHED BLOCK HASH:"
+  debug "------------------"
+  debug "${BLOCK_HASH}"
+  debug "------------------"
+
+  local TEMPV=$(echo "${RET}" | $GREP block | $GREP -oP ':(.*)')
+  BLOCK=$(strip_block "${TEMPV}")
+  echo "$BLOCK"
+}
+
+
+
 check_dependencies
 [[ $? -ne 0 ]] && echo "${BASH_SOURCE[0]} had dependency errors - this script may not function." || echo "${BASH_SOURCE[0]} sourced."
 
@@ -2815,4 +3119,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=0e8f4be3964f8dde6e9b859637f9bcee
+NANO_FUNCTIONS_HASH=aebf91bc7414e1f7d4671689c8e5cc33
