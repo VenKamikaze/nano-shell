@@ -21,14 +21,18 @@ NANO_FUNCTIONS_VERSION=0.99
 #                   - Add password_change_rpc, password_enter_rpc RPC
 #                   - Add key_expand_text_rpc
 #                   - Add work_validate_rpc (UNTESTED)
+#                   - Add active_difficulty_rpc, active_difficulty_threshold, active_difficulty_active
 #                   - Add optional 'subtype' field for process_rpc / broadcast_block
 #                   - Use optional 'subtype' field for process_rpc / broadcast_block for most internal calls
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
+#                   - Change raw_to_mnano to show six decimal places
 #          - Bugfix
 #                   - Handle return of nano_ prefixed addresses in offline signing functions
 #                   - Fix generate_spam_send_to_file function when empty block store exists already 
 #                   - Fix parameter group parsing in nano_shell_help functions
+#                   - Avoid swallowing node RPC output when there are errors - output to stderr instead.
+#                   -   TODO: This means a frequent doubling of errors from both stderr and stdout for many functions
 #
 # Last Changed By: M. Saunders
 
@@ -280,6 +284,7 @@ check_dependencies() {
 # Desc: Checks if the node is running by executing a block_count RPC call
 # Desc: Will echo 'Node is running' and returns 0 if UP
 # Desc: Otherwise outputs an error message and returns 0 if DOWN
+# Desc: (Note: swallows node RPC errors if any)
 # RPC: block_count
 # Returns: Text and return code (0 is UP, 1 is DOWN)
 is_node_up() {
@@ -291,6 +296,7 @@ is_node_up() {
 # Desc: Determines the network the node is operating
 # Desc: within. It does this by looking for particular
 # Desc: block hashes.
+# Desc: (Note: swallows node RPC errors if any)
 # RPC: block:hash
 # Returns: Text (PROD,BETA,OTHER)
 determine_network() {
@@ -486,7 +492,7 @@ available_supply_rpc() {
 # RPC: available_supply
 # Returns: Number
 available_supply() {
-  local RET=$(available_supply_rpc | $GREP available | $CUT -d'"' -f4)
+  local RET=$(available_supply_rpc | show_errors | $GREP available | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -643,7 +649,7 @@ version_rpc() {
 # RPC: version
 # Returns: Decimal version number (major.minor)
 nano_version_number() {
-  local RET=$(version_rpc 2>/dev/null | $GREP node_vendor | $CUT -d'"' -f4)
+  local RET=$(version_rpc 2>/dev/null | show_errors | $GREP node_vendor | $CUT -d'"' -f4)
   local FULL_VERSION_STRING=
   local MAJOR_VERSION=
   local MINOR_VERSION=
@@ -762,7 +768,7 @@ accounts_create_rpc() {
 # Returns: Hash
 get_frontier_hash_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$(account_info_rpc "${ACCOUNT}" | $GREP frontier | $CUT -d'"' -f4)
+  local RET=$(account_info_rpc "${ACCOUNT}" | show_errors | $GREP frontier | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -774,7 +780,7 @@ get_frontier_hash_from_account() {
 # Returns: Number
 get_balance_from_account() {
   local ACCOUNT=${1:-}
-  local RET=$(account_info_rpc "${ACCOUNT}" | $GREP balance | $CUT -d'"' -f4)
+  local RET=$(account_info_rpc "${ACCOUNT}" | show_errors | $GREP balance | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -785,7 +791,7 @@ get_balance_from_account() {
 # Returns: Number
 get_account_pending() {
   local ACCOUNT=${1:-}
-  local RET=$(account_balance_rpc "${ACCOUNT}" | $GREP pending | $CUT -d'"' -f4)
+  local RET=$(account_balance_rpc "${ACCOUNT}" | show_errors | $GREP pending | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -796,7 +802,7 @@ get_account_pending() {
 # Returns: Nano address
 get_account_representative() {
   local ACCOUNT=${1:-}
-  local RET=$(account_representative_rpc "${ACCOUNT}" | $GREP representative | $CUT -d'"' -f4)
+  local RET=$(account_representative_rpc "${ACCOUNT}" | show_errors | $GREP representative | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -807,7 +813,7 @@ get_account_representative() {
 # Returns: Public key
 get_account_public_key() {
   local ACCOUNT=${1:-}
-  local RET=$(account_key_rpc "${ACCOUNT}" | $GREP key | $CUT -d'"' -f4)
+  local RET=$(account_key_rpc "${ACCOUNT}" | show_errors | $GREP key | $CUT -d'"' -f4)
   echo $RET
 }
 
@@ -820,7 +826,7 @@ get_account_public_key() {
 # Returns: JSON from node RPC
 account_create() {
   local WALLET=${1:-}
-  echo $(accounts_create_rpc "${WALLET}" "1" "true")
+  accounts_create_rpc "${WALLET}" "1" "true"
 }
 
 #######################################
@@ -921,16 +927,14 @@ wallet_export_rpc() {
 wallet_contains() {
   local WALLET=${1:-}
   local ACCOUNT=${2:-}
-  local RET=$(wallet_contains_rpc "${WALLET}" "${ACCOUNT}" | $GREP exists | $CUT -d'"' -f4)
-  echo $RET
+  wallet_contains_rpc "${WALLET}" "${ACCOUNT}" | show_errors | $GREP exists | $CUT -d'"' -f4
 }
 
 # Desc: Creates a new random wallet
 # RPC: wallet_create
 # Returns: Wallet UUID
 wallet_create() {
-  local RET=$(wallet_create_rpc | $GREP wallet | $CUT -d'"' -f4)
-  echo $RET
+  wallet_create_rpc | show_errors | $GREP wallet | $CUT -d'"' -f4
 }
 
 #######################################
@@ -968,11 +972,9 @@ search_pending_rpc() {
 # Returns: or 0 if success (block found)
 block_info_rpc() {
   local HASH=${1:-}
-  local RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}")
-  RETVAL=0
-  if [[ -n $(echo "$RET" | $GREP error) ]]; then
-    RETVAL=1
-  fi
+  local RET=
+  RET=$($CURL -sS -g -d '{ "action": "block", "hash": "'${HASH}'" }' "${NODEHOST}" | show_errors)
+  RETVAL=$?
   echo $RET
   return $RETVAL
 }
@@ -989,7 +991,7 @@ block_info_rpc() {
 # Returns: Boolean as number (1 true, 0 false)
 get_pending_exists() {
   local HASH=${1:-}
-  local RET=$(pending_exists_rpc "${HASH}" | $GREP exists | $CUT -d'"' -f4 )
+  local RET=$(pending_exists_rpc "${HASH}" | show_errors | $GREP exists | $CUT -d'"' -f4 )
   echo $RET
 }
 
@@ -1001,7 +1003,7 @@ get_pending_exists() {
 # Returns: Boolean as number (1 true, 0 false) indicating if searching has started
 search_pending() {
   local WALLET=${1:-}
-  local RET=$(search_pending_rpc "${WALLET}" | $GREP started | $CUT -d'"' -f4 )
+  local RET=$(search_pending_rpc "${WALLET}" | show_errors | $GREP started | $CUT -d'"' -f4 )
   echo $RET
 }
 
@@ -1115,7 +1117,6 @@ block_info_amount_mnano() {
   [[ $RETVAL -ne 0 ]] && echo "$RAW_AMOUNT" && return $RETVAL
 
   echo $(raw_to_mnano ${RAW_AMOUNT})
-  #local RET=$($CURL -sS -g -d '{ "action": "mrai_from_raw", "amount": "'${RAW_AMOUNT}'" }' "${NODEHOST}" | $GREP amount | $CUT -d'"' -f4)
 }
 
 #######################################
@@ -1159,7 +1160,7 @@ wallet_change_seed_text_rpc() {
   local WALLET=${1:-}
   local SEED=${2:-}
   local RET; local RETVAL
-  RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}")
+  RET=$($CURL -sS -g -d '{ "action": "wallet_change_seed", "wallet": "'${WALLET}'", "seed": "'${SEED}'" }' "${NODEHOST}" | show_errors)
   RETVAL=$?
   echo "${RET}"
   return $RETVAL
@@ -1196,7 +1197,7 @@ wallet_change_seed() {
 JSON
 )
   RETVAL=$?
-  echo "${RET}"
+  echo "${RET}" | show_errors
   return $RETVAL
 }
 
@@ -1227,7 +1228,7 @@ deterministic_keys_rpc_text() {
   local SEED=${1:-}
   local INDEX=${2:-}
   echo SEED $SEED
-  local RET=$($CURL -sS -g -d '{ "action": "deterministic_key", "seed": "'${SEED}'", "index": "'${INDEX}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "deterministic_key", "seed": "'${SEED}'", "index": "'${INDEX}'" }' "${NODEHOST}" | show_errors)
   echo $RET
 }
 
@@ -1264,7 +1265,7 @@ deterministic_keys_rpc() {
 JSON
 )
   RETVAL=$?
-  echo "${RET}"
+  echo "${RET}" | show_errors
   return $RETVAL
 }
 
@@ -1284,7 +1285,7 @@ key_expand_rpc() {
 
   local RET; local RETVAL
   local KEY=${1:-}
-  RET=$($CURL -sS -g -d '{ "action": "key_expand", "key": "'${KEY}'" }' "${NODEHOST}")
+  RET=$($CURL -sS -g -d '{ "action": "key_expand", "key": "'${KEY}'" }' "${NODEHOST}" | show_errors)
   RETVAL=$?
   echo $RET
   return $RETVAL
@@ -1371,6 +1372,10 @@ JSON
 )
   RETVAL=$?
   debug 'Got back result: '"$RET"
+  if [[ 0 -eq $RETVAL ]]; then
+    echo $RET | show_errors
+    return $?
+  fi
   echo $RET
   return $RETVAL
 }
@@ -1400,8 +1405,38 @@ work_validate_rpc() {
 JSON
 )
   RETVAL=$?
+  if [[ 0 -eq $RETVAL ]]; then
+    echo $RET | show_errors
+    return $?
+  fi
   echo $RET
   return $RETVAL
+}
+
+# Desc: Returns the network's current active PoW difficulty
+# Desc: and the node's configured threshold difficulty
+# Desc: Note: Undocumented RPC feature as of V19.0RC1
+# Desc:   This RPC call name may change so is not guaranteed to work.
+# RPC: active_difficulty
+# Returns: JSON from the node RPC.
+active_difficulty_rpc() {
+  $CURL -sS -g -d '{ "action": "key_expand", "key": "'${KEY}'" }' "${NODEHOST}"
+}
+
+# Desc: Returns the node's configured threshold difficulty
+# RPC: active_difficulty
+# Returns: Hex value for lowest difficulty threshold configured for the node.
+active_difficulty_threshold() {
+  local RETVAL=0; local RET=
+  active_difficulty_rpc | show_errors | $GREP "threshold" | $CUT -d'"' -f4
+}
+
+# Desc: Returns the network's current active PoW difficulty 
+# RPC: active_difficulty
+# Returns: Hex value for network's current detected difficulty.
+active_difficulty_active() {
+  local RETVAL=0; local RET=
+  active_difficulty_rpc | show_errors | $GREP "active" | $CUT -d'"' -f4
 }
 
 # Desc: Broadcast the given JSON block to the network
@@ -1425,6 +1460,10 @@ JSON
 )
   RETVAL=$?
   DEBUG_BROADCAST=$RET
+  if [[ 0 -eq $RETVAL ]]; then
+    echo $RET | show_errors
+    return $?
+  fi
   echo $RET
   return $RETVAL
 }
@@ -1470,7 +1509,7 @@ work_peers_rpc() {
 # Returns: JSON from the node RPC
 # DEPRECATED: Just wraps work_peers_rpc. May be removed in future version
 work_peer_list() {
-  work_peers_rpc $@
+  work_peers_rpc $@ | show_errors
 }
 
 # Desc: Add a work peer to farm out the PoW
@@ -1503,7 +1542,7 @@ work_peer_add_rpc() {
 # Returns: Text (success) or empty on failure.
 work_peer_add() {
   local RETVAL; local RET=
-  RET=$(work_peer_add_rpc $@)
+  RET=$(work_peer_add_rpc $@ | show_errors)
   RETVAL=$?
   [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to add work peer. Response was ${RET}, exit code ($RETVAL)." && return 1
   echo success
@@ -1517,7 +1556,7 @@ work_peer_add() {
 # Returns: Text (success) or empty on failure.
 work_peer_clear_all() {
   local RET; local RETVAL
-  RET=$(work_peers_clear_rpc $@)
+  RET=$(work_peers_clear_rpc $@ | show_errors)
   RETVAL=$?
   [[ $(echo "${RET}" | $GREP -o success) != "success" ]] && error "RPC failed to clear all work peers. Response was ${RET}, exit code ($RETVAL)." && return 1
 
@@ -1536,6 +1575,21 @@ work_peers_clear_rpc() {
 #######################################
 # Convenience functions
 #######################################
+
+# Desc: Grep's stdin and if 'error' is found, will
+# Desc: output the string to stderr, and give off a non-zero (1)
+# Desc: return code.
+# Desc: This is used by many internal wrapper functions so we
+# Desc: do not swallow the node RPC error messages.
+# Desc: WARNING: THIS WILL BLOCK ON WAITING FOR STDIN.
+# Returns: The input, but outputs any string containing 'error' to stderr
+show_errors() {
+  local INPUT=$(cat -)
+  local ERROR=$(echo "${INPUT}"| $GREP -i "error")
+  [[ -n "$ERROR" ]] && echo "$ERROR" >&2 && echo "${INPUT}" && return 1
+  echo "${INPUT}"
+  return 0
+}
 
 # Desc: Escapes any special characters in given input
 # Desc: Thanks to: http://stackoverflow.com/a/2705678/120999
@@ -1582,11 +1636,11 @@ strip_block() {
 # Desc: MNano (standard measurement unit in 2018)
 # P1: <$raw_nano_amount_number>
 # P1Desc: The raw nano amount to convert into MNano
-# Returns: Number (MNano to two decimal places only)
+# Returns: Number (MNano to six decimal places only)
 raw_to_mnano() {
   local RAW_AMOUNT=${1:-}
 
-  local RET=$(echo "scale=2; ${RAW_AMOUNT} / ${ONE_MNANO}" | $BC)
+  local RET=$(echo "scale=6; ${RAW_AMOUNT} / ${ONE_MNANO}" | $BC)
   echo $RET
 }
 
@@ -1723,6 +1777,7 @@ get_nano_functions_md5sum() {
 # Desc: Get the major version of the node
 # Desc: e.g. if you run node v16.3
 # Desc: it will return 16
+# Desc: (Note: swallows errors from the node RPC)
 # Returns: Number (major version of node)
 get_nano_version_major() {
   [[ -z "${NANO_NODE_VERSION:-}" ]] && NANO_NODE_VERSION=$(nano_version_number)
@@ -1732,6 +1787,7 @@ get_nano_version_major() {
 # Desc: Get the minor version of the node
 # Desc: e.g. if you run node v16.3
 # Desc: it will return 3
+# Desc: (Note: swallows errors from the node RPC)
 # Returns: Number (minor version of node)
 get_nano_version_minor() {
   [[ -z "${NANO_NODE_VERSION:-}" ]] && NANO_NODE_VERSION=$(nano_version_number)
@@ -1748,6 +1804,7 @@ get_nano_version_minor() {
 
 # Desc: Checks if the node version of greater or equal
 # Desc: to the given major and minor version parameters
+# Desc: (Note: swallows errors from the node RPC)
 # P1: <$major_number>
 # P1Desc: The major version to compare
 # P2: <$minor_number>
@@ -1882,7 +1939,7 @@ open_block() {
 send_block() {
   [[ 1 -ne $(allow_unsafe_commands) ]] && return 1
   local NEWBLOCK; local RET=255
-  local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${2}")
+  local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${2}" 2>/dev/null)
   debug "Group 2 parameters ? ${IS_FIRST_PARAM_WALLET_UUID}"
 
   if [[ ( $# -eq 4 || $# -eq 5 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 0 ]]; then
@@ -2269,7 +2326,7 @@ __create_open_block_privkey() {
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to open account $DESTACCOUNT with state block by receiving block $SOURCE"
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}" 2>/dev/null | show_errors)
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2350,7 +2407,7 @@ __create_open_block_wallet() {
   debug 'JSON data: { "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to open account $ACCOUNT with state block by receiving block $SOURCE"
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "wallet": "'${WALLET}'", "account": "'${ACCOUNT}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}" 2>/dev/null | show_errors)
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2447,6 +2504,7 @@ __create_send_block_privkey() {
   { "action": "block_create", "type": "state", "key": "${PRIVKEY}", "account": "${SRCACCOUNT}", "link": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}", "representative": "${REPRESENTATIVE}" ${WORK} }
 JSON
 )
+  echo "$RET" | show_errors >/dev/null
   RETVAL=$?
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
@@ -2547,6 +2605,7 @@ __create_send_block_wallet() {
   { "action": "block_create", "type": "state", "wallet": "${WALLET_UUID}", "account": "${SRCACCOUNT}", "link": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}", "representative": "${REPRESENTATIVE}" ${WORK} }
 JSON
 )
+  echo $RET | show_errors >/dev/null
   RETVAL=$?
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
@@ -2636,7 +2695,7 @@ __create_receive_block_privkey() {
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }'
 
   debug "About to generate state receive block for $DESTACCOUNT by receiving block $SOURCE"
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}")
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "representative": "'${REPRESENTATIVE}'", "source": "'${SOURCE}'", "destination": "'${DESTACCOUNT}'", "previous": "'${PREVIOUS}'", "balance": "'${NEW_BALANCE}'" }' "${NODEHOST}" 2>/dev/null | show_errors)
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2711,7 +2770,7 @@ __create_changerep_block_privkey() {
   debug "Changing representative for ${SRCACCOUNT} to ${REPRESENTATIVE} | Existing balance: ${CURRENT_BALANCE}"
   debug 'JSON data: { "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'" }'
 
-  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}" 2>/dev/null)
+  local RET=$($CURL -sS -g -d '{ "action": "block_create", "type": "state", "key": "'${PRIVKEY}'", "account": "'${SRCACCOUNT}'", "link": "'${ZEROES}'", "previous": "'${PREVIOUS}'", "balance": "'${CURRENT_BALANCE}'", "representative": "'${REPRESENTATIVE}'"}' "${NODEHOST}" 2>/dev/null| show_errors)
   debug "UNPUBLISHED BLOCK FULL RESPONSE:"
   debug "------------------"
   debug "$RET"
@@ -2756,4 +2815,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=579642f1b63f5664943f8f57ce44ecae
+NANO_FUNCTIONS_HASH=0e8f4be3964f8dde6e9b859637f9bcee
