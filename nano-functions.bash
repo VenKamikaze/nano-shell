@@ -25,7 +25,7 @@ NANO_FUNCTIONS_VERSION=0.99
 #                   - Add work_validate_rpc (UNTESTED)
 #                   - Add active_difficulty_rpc, active_difficulty_threshold, active_difficulty_active
 #                   - Add optional 'subtype' field for process_rpc / broadcast_block
-#                   - Use optional 'subtype' field for process_rpc / broadcast_block for most internal calls
+#                   - Use optional 'subtype' field for process_rpc / broadcast_block for most internal calls if node V18+
 #          - Refactor
 #                   - nanowat.ch has been shutdown - we no longer use it for remote_block_count
 #                   - Change raw_to_mnano to show six decimal places
@@ -1389,7 +1389,7 @@ JSON
 # P1Desc: The work signature hash to validate
 # P2: <$block_hash>
 # P2Desc: The block hash to verify the work signature on
-# P3o: <$difficulty>
+# P3o: <$difficulty> (node V19+ only)
 # P3Desc: The hexadecimal difficulty string to use as part of the 
 # P3Desc:   work validation. Optional param (if standard difficulty).
 # Returns: JSON from the node RPC.
@@ -1400,7 +1400,7 @@ work_validate_rpc() {
   local RET; local RETVAL
   [[ -z "${BLOCK_HASH}" ]] && echo Must provide the BLOCK && return 1
   [[ -z "${WORK_VALUE}" ]] && echo Must provide the work value to verify && return 1
-  [[ -n "${DIFFICULTY_HEX}" ]] && DIFFICULTY_PARAM=", \"difficulty\": \"${DIFFICULTY_HEX}\""
+  [[ -n "${DIFFICULTY_HEX}" && $(is_version_equal_or_greater 19 0) == "true" ]] && DIFFICULTY_PARAM=", \"difficulty\": \"${DIFFICULTY_HEX}\""
 
   RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
 { "action": "work_validate", "work": "${WORK_VALUE}", "hash": "${BLOCK_HASH}" ${DIFFICULTY_PARAM} }
@@ -1417,11 +1417,14 @@ JSON
 
 # Desc: Returns the network's current active PoW difficulty
 # Desc: and the node's configured threshold difficulty
-# Desc: Note: Undocumented RPC feature as of V19.0RC1
+# Desc: Note: Undocumented RPC feature beginning at V19.0RC1
 # Desc:   This RPC call name may change so is not guaranteed to work.
 # RPC: active_difficulty
 # Returns: JSON from the node RPC.
 active_difficulty_rpc() {
+  if [[ $(is_version_equal_or_greater 19 0) != "true" ]]; then
+    error "This RPC call is only available for node V19+" && return 1
+  fi
   $CURL -sS -g -d '{ "action": "key_expand", "key": "'${KEY}'" }' "${NODEHOST}"
 }
 
@@ -1445,15 +1448,14 @@ active_difficulty_active() {
 # RPC: process:block
 # P1: <$json_block>
 # P1Desc: The JSON block to broadcast.
-# P2o: <$subtype>
+# P2o: <$subtype> (node V18+ only)
 # P2Desc: Specify the block sub-type to prevent accidental
 # P2Desc: sends instead of a receive when using state blocks.
 # Returns: JSON from the node RPC.
 process_rpc() {
   local BLOCK="${1:-}"
   local SUBTYPE="${2:-}"; local SUBTYPE_PARAM=
-  [[ -n "${SUBTYPE}" ]] && SUBTYPE_PARAM=", \"subtype\": \"${SUBTYPE}\""
-  debug "Subtype Param: ${SUBTYPE_PARAM}"
+  [[ -n "${SUBTYPE}" && $(is_version_equal_or_greater 18 0) == "true" ]] && SUBTYPE_PARAM=", \"subtype\": \"${SUBTYPE}\"" && debug "Subtype Param: ${SUBTYPE_PARAM}"
   local RET; local RETVAL
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
   RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
@@ -1852,7 +1854,7 @@ is_version_equal_or_greater() {
 # g1P4: <$representative_account>
 # g1P4Desc: The representative to set for the 
 # g1P4Desc: $destaccount
-# g1P5o: <$work_signature>
+# g1P5o: <$work_signature> (node V19+ only)
 # g1P5Desc: The pre-computed work value to use for signing
 # g1P5Desc: this block. This will avoid calculating new work
 # g1P5Desc: and will use the value provided in this parameter.
@@ -1868,7 +1870,7 @@ is_version_equal_or_greater() {
 # g2P4: <$representative_account>
 # g2P4Desc: The representative to set for the 
 # g2P4Desc: $destaccount
-# g2P5o: <$work_signature>
+# g2P5o: <$work_signature> (node V19+ only)
 # g2P5Desc: The pre-computed work value to use for signing
 # g2P5Desc: this block. This will avoid calculating new work
 # g2P5Desc: and will use the value provided in this parameter.
@@ -1920,7 +1922,7 @@ open_block() {
 # g1P4: <$balance_MNano>
 # g1P4Desc: The NANO (MNano) amount to send
 # g1P4Desc: to the $destaccount
-# g1P5o: <$work_signature>
+# g1P5o: <$work_signature> (node V19+ only)
 # g1P5Desc: The pre-computed work value to use for signing
 # g1P5Desc: this block. This will avoid calculating new work
 # g1P5Desc: and will use the value provided in this parameter.
@@ -1935,7 +1937,7 @@ open_block() {
 # g2P4: <$balance_MNano>
 # g2P4Desc: The NANO (MNano) amount to send
 # g2P4Desc: to the $destaccount
-# g2P5o: <$work_signature>
+# g2P5o: <$work_signature> (node V19+ only)
 # g2P5Desc: The pre-computed work value to use for signing
 # g2P5Desc: this block. This will avoid calculating new work
 # g2P5Desc: and will use the value provided in this parameter.
@@ -1986,7 +1988,7 @@ send_block() {
 # g1P2Desc: The block hash to pocket
 # g1P3: <$destaccount>
 # g1P3Desc: The account to receive the funds
-# g1P4o: <$work_signature>
+# g1P4o: <$work_signature> (node V19+ only)
 # g1P4Desc: The pre-computed work value to use for signing
 # g1P4Desc: this block. This will avoid calculating new work
 # g1P4Desc: and will use the value provided in this parameter.
@@ -1997,7 +1999,7 @@ send_block() {
 # g2P2Desc: The block hash to pocket
 # g2P3: <$destaccount>
 # g2P3Desc: The account to receive the funds
-# g2P4o: <$work_signature>
+# g2P4o: <$work_signature> (node V19+ only)
 # g2P4Desc: The pre-computed work value to use for signing
 # g2P4Desc: this block. This will avoid calculating new work
 # g2P4Desc: and will use the value provided in this parameter.
@@ -2009,10 +2011,10 @@ receive_block() {
   local IS_FIRST_PARAM_WALLET_UUID=$(wallet_contains "${1}" "${3}" 2>/dev/null)
   debug "Group 2 parameters ? ${IS_FIRST_PARAM_WALLET_UUID}"
   if [[ ( $# -eq 3 || $# -eq 4 ) && ${IS_FIRST_PARAM_WALLET_UUID} -eq 0 ]]; then
-    NEWBLOCK=$(__create_receive_block_privkey $@)
+    NEWBLOCK=$(__create_receive_block_privkey "${1}" "${2}" "${3}" "" "${4:-}")
     RET=$?
   elif [[ $# -eq 3 || $# -eq 4 ]]; then
-    NEWBLOCK=$(__create_receive_block_wallet $@)
+    NEWBLOCK=$(__create_receive_block_wallet "${1}" "${2}" "${3}" "" "${4:-}")
 	RET=$?
   else
     error "Invalid parameters
@@ -2038,7 +2040,7 @@ receive_block() {
 # g1P3: <$representative_account>
 # g1P3Desc: The representative account to set for
 # g1P3Desc: $account
-# g1P4o: <$work_signature>
+# g1P4o: <$work_signature> (node V19+ only)
 # g1P4Desc: The pre-computed work value to use for signing
 # g1P4Desc: this block. This will avoid calculating new work
 # g1P4Desc: and will use the value provided in this parameter.
@@ -2050,7 +2052,7 @@ receive_block() {
 # g2P3: <$representative_account>
 # g2P3Desc: The representative account to set for
 # g2P3Desc: $account
-# g2P4o: <$work_signature>
+# g2P4o: <$work_signature> (node V19+ only)
 # g2P4Desc: The pre-computed work value to use for signing
 # g2P4Desc: this block. This will avoid calculating new work
 # g2P4Desc: and will use the value provided in this parameter.
@@ -2747,8 +2749,6 @@ __create_receive_block_privkey() {
   local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
-  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
   local WORK_VALUE=${5:-}
   local WORK=
   [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
@@ -2759,8 +2759,10 @@ __create_receive_block_privkey() {
 
   [[ -z "${REPRESENTATIVE}" ]] && REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
   if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
+    error "VALIDATION FAILED: Representative account for ${DESTACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
   fi
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
 
   local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
   if [[ -z "$CURRENT_BALANCE" ]]; then
@@ -2851,8 +2853,6 @@ __create_receive_block_wallet() {
   local DESTACCOUNT_NOPREFIX="${DESTACCOUNT/xrb_/}"
   DESTACCOUNT_NOPREFIX="${DESTACCOUNT_NOPREFIX/nano_/}"
   local REPRESENTATIVE=${4:-}
-  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
-  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
   local WORK_VALUE=${5:-}
   local WORK=
   [[ -n "${WORK_VALUE}" ]] && WORK=", \"work\": \"${WORK_VALUE}\""
@@ -2863,8 +2863,10 @@ __create_receive_block_wallet() {
 
   [[ -z "${REPRESENTATIVE}" ]] && REPRESENTATIVE=$(get_account_representative "${DESTACCOUNT}")
   if [[ ! ( ${REPRESENTATIVE} == xrb* && ${#REPRESENTATIVE} -eq 64 || ${REPRESENTATIVE} == nano* && ${#REPRESENTATIVE} -eq 65 ) ]]; then
-    error "VALIDATION FAILED: Representative account for ${SRCACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
+    error "VALIDATION FAILED: Representative account for ${DESTACCOUNT} is unrecognised format (does not start with xrb or nano and does not match expected length). Got ${REPRESENTATIVE}" && return 11
   fi
+  local REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE/xrb_/}"
+  REPRESENTATIVE_NOPREFIX="${REPRESENTATIVE_NOPREFIX/nano_/}"
 
   local CURRENT_BALANCE=$(get_balance_from_account ${DESTACCOUNT})
   if [[ -z "$CURRENT_BALANCE" ]]; then
@@ -2886,7 +2888,7 @@ __create_receive_block_wallet() {
   
   local RET=
   RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
-  { "action": "block_create", "type": "state", "wallet": "${WALLET_UUID}", "account": "${DESTACCOUNT}", "representative": "${REPRESENTATIVE}", "source": "${SOURCE}", "destination": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}" ${WORK} }
+  { "action": "block_create", "type": "state", "wallet": "${WALLET_UUID}", "account": "${DESTACCOUNT}", "representative": "${REPRESENTATIVE}", "source": "${SOURCE_BLOCK_HASH}", "destination": "${DESTACCOUNT}", "previous": "${PREVIOUS}", "balance": "${NEW_BALANCE}" ${WORK} }
 JSON
 )
   echo $RET | show_errors >/dev/null
@@ -3119,4 +3121,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=aebf91bc7414e1f7d4671689c8e5cc33
+NANO_FUNCTIONS_HASH=76dc1252d31d29a50a0f9573ee18d01e
