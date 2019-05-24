@@ -8,8 +8,17 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.99
+NANO_FUNCTIONS_VERSION=0.991
 
+# Version: 0.991
+#          - Feature
+#                   - Add peer_details optional parameter to peers_rpc (v18+)
+#                   - Add 'confirmation_history_rpc' (v19+)
+#                   - Add 'block_confirm_rpc' (v12.2+)
+#                   - Add 'representatives_online_rpc' (v18+)
+#          - Bugfix
+#                   - Add parameter 'block_hash' to boostrap_lazy_rpc
+#
 # Version: 0.99
 #          - Feature
 #                   - Adopt a naming standard for function names (WIP)
@@ -520,13 +529,16 @@ bootstrap_status_rpc() {
 
 # Desc: Initiates a lazy bootstrapping attempt
 # RPC: bootstrap_lazy
+# P1: <$block_hash>
+# P1Desc: Lazy bootstrap this particular block_hash
 # Returns: JSON from the node RPC
 bootstrap_lazy_rpc() {
+  local BLOCK_HASH="${1:-}"
   if [[ $(is_version_equal_or_greater 17 0) != "true" ]]; then
     error "Node v17.0RC1 and above required to use this RPC call"
     return 1
   fi
-  $CURL -sS -g -d '{ "action": "bootstrap_lazy" }' "${NODEHOST}"
+  $CURL -sS -g -d '{ "action": "bootstrap_lazy", "hash": "'${BLOCK_HASH}'" }' "${NODEHOST}"
 }
 
 # Desc: Query the public API at the given site to retrieve a block count
@@ -695,6 +707,40 @@ peers_rpc() {
 { "action": "peers" ${PEER_DETAILS_PARAM} }
 JSON
 }
+
+# Desc: Query the confirmation history (only shows last 2048 blocks)
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: confirmation_history
+# P1o: <$hash>
+# P1Desc: Show only the confirmation_history for the given block hash if avialable
+# Returns: JSON from the node RPC
+confirmation_history_rpc() {
+  local BLOCK_HASH="${1:-}"
+  local BLOCK_HASH_PARAM=
+  [[ -n "${BLOCK_HASH}" ]] && BLOCK_HASH_PARAM=", \"hash\": \"${BLOCK_HASH}\""
+
+  $CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "confirmation_history" ${BLOCK_HASH_PARAM} }
+JSON
+}
+
+# Desc: Query the list of online representatives that have voted recently
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: representatives_history
+# P1o: <$weight>
+# P1Desc: Show the associated voting weight for the representative (V17+)
+# P1Desc: Pass parameter as 'weight' if you wish to show this
+# Returns: JSON from the node RPC
+representatives_online_rpc() {
+  local WEIGHT="${1:-}"
+  local WEIGHT_PARAM=
+  [[ -n "${WEIGHT_PARAM}" && "${WEIGHT}" == "weight" && $(is_version_equal_or_greater 17 0) == "true" ]] && WEIGHT_PARAM=", \"weight\": \"true\""
+
+  $CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "representatives_online" ${WEIGHT_PARAM} }
+JSON
+}
+
 
 #######################################
 # Account RPC functions
@@ -989,6 +1035,23 @@ block_info_rpc() {
   return $RETVAL
 }
 
+# Desc: Request confirmation for $block_hash from online representatives.
+# Desc: Result must be checked with confirmation_history rpc afterwards
+# Desc: Returns JSON result directly from node, no parsing/formatting applied.
+# RPC: block_confirm
+# P1: <$block_hash>
+# P1Desc: Check this block_hash for confirmation.
+# Returns: JSON from the node RPC
+block_confirm_rpc() {
+  local BLOCK_HASH=${1:-}
+  if [[ $(is_version_equal_or_greater 12 2) != "true" ]]; then
+    error "This RPC call is only available for node V12.2+" && return 1
+  fi
+
+  $CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
+{ "action": "block_confirm", "hash": "${BLOCK_HASH}" }
+JSON
+}
 
 #######################################
 # Block info wrapper functions
@@ -3129,4 +3192,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=bfadfa56e2e25e920f9ff71cd461bd6f
+NANO_FUNCTIONS_HASH=0972e0fef4b983d76416c7f00aeee218
