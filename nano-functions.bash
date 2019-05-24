@@ -684,12 +684,12 @@ stats_counters_rpc() {
 # Desc: Returns JSON result directly from node, no parsing/formatting applied.
 # RPC: peers
 # P1o: <$peer_details>
-# P1Desc: Show additional peer details if 'peer_details' is passed in.
+# P1Desc: Show additional peer details if 'peer_details' is passed in (V18+).
 # Returns: JSON from the node RPC
 peers_rpc() {
   local PEER_DETAILS="${1:-}"
   local PEER_DETAILS_PARAM=
-  [[ -n "${PEER_DETAILS}" && "${PEER_DETAILS}" == "peer_details" && $(is_version_equal_or_greater 19 0) == "true" ]] && PEER_DETAILS_PARAM=", \"peer_details\": \"true\""
+  [[ -n "${PEER_DETAILS}" && "${PEER_DETAILS}" == "peer_details" && $(is_version_equal_or_greater 18 0) == "true" ]] && PEER_DETAILS_PARAM=", \"peer_details\": \"true\""
 
   $CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
 { "action": "peers" ${PEER_DETAILS_PARAM} }
@@ -3129,4 +3129,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=0d5229b1ec92233bf487ffc03d42efc9
+NANO_FUNCTIONS_HASH=bfadfa56e2e25e920f9ff71cd461bd6f
