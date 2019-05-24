@@ -45,7 +45,7 @@ poll_confirmation_history() {
     determine_unique_per_rate ${CONF_FILE_PREFIX} ${INDEX} ${DELAY_IN_SEC} > "${OUTPUT_FILE}"
     clear && cat "${OUTPUT_FILE}"
     sleep ${DELAY_IN_SEC}
-    let INDEX=$INDEX+1
+    (( INDEX += 1 ))
     if [[ $(( $INDEX % $ARRAY_CLEAN_MODULUS )) -eq 0 ]]; then
       echo "Debug: Cleaning array..."
       CONFIRMATION_SAMPLES_ARRAY_2=("${CONFIRMATION_SAMPLES_ARRAY_1[@]:ARRAY_60MIN_MARKER}")
@@ -67,6 +67,8 @@ determine_unique_per_rate() {
   declare -i COUNT_BASELINE=$(cat ${CURRENT_CONF_FILE} | wc -l)
   declare -i COUNT_UNIQUE_NEW_PLUS_BASELINE=$(cat ${CURRENT_CONF_FILE} ${PREV_CONF_FILE} | $SORT -u | $WC -l)
   declare -i COUNT_UNIQUE_PER_RATE=${COUNT_UNIQUE_NEW_PLUS_BASELINE}-${COUNT_BASELINE}
+  (( CURRENT_INDEX = ${#CONFIRMATION_SAMPLES_ARRAY_1[@]} ))
+  (( PREV_INDEX = ${CURRENT_INDEX} - 1 ))
   CONFIRMATION_SAMPLES_ARRAY_1+=(${COUNT_UNIQUE_PER_RATE})
   #echo "debug0: ${#CONFIRMATION_SAMPLES_ARRAY_1[@]}"
   #echo "debug1: RT=$RUNNING_TALLY,$COUNT_UNIQUE_PER_RATE"
