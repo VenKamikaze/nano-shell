@@ -8,7 +8,15 @@
 #
 # Use this script at your own risk - I can take no responsibility for any loss or damage caused by use of this script. 
 #
-NANO_FUNCTIONS_VERSION=0.991
+NANO_FUNCTIONS_VERSION=0.992
+
+# Version: 0.992
+#          - Feature
+#                   - Add 'include_cemented' option to block_count_rpc (v19+)
+#                   - Add 'watch_work' option to process_rpc (v20+)
+#                   - Add 'watch_work' option to broadcast_block (v20+)
+#                   - Set watch_work to false when doing spam sends.
+#
 
 # Version: 0.991
 #          - Feature
@@ -204,7 +212,7 @@ NANO_NODE_VERSION_UNKNOWN=99.99
 PROD_BURN_TX_HASH=ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113
 BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23
 
-DIFFICULTY_WEAK=ffffffb000000000
+DIFFICULTY_WEAK=0xfffffc0000000000 # 1x on Beta Network, under minimum/does not work on LIVE
 DIFFICULTY_NORMAL=ffffffc000000000 # 1x
 DIFFICULTY_STRONG=ffffffcaaaaaa800 # 2x
 DIFFICULTY_VERY_STRONG=ffffffdaaaaaa000
@@ -507,11 +515,20 @@ available_supply() {
   echo $RET
 }
 
-# Desc: Show the checked (valid or processed) and unchecked (invalid or queued) total blocks known to the node
+# Desc: Show the checked (valid or processed) and unchecked (invalid or queued)
+# Desc: and (optionally) cemented blocks, known to the node
 # RPC: block_count
+# P1: <$include_cemented>
+# P1Desc: Include cemented block count. Requires v19+
+# P1Desc: Expects either true or false as a value.
 # Returns: JSON from the node RPC
 block_count_rpc() {
-  $CURL -sS -g -d '{ "action": "block_count" }' "${NODEHOST}"
+  local INCLUDE_CEMENTED_VAL="${1:-false}"
+  if [[ "${INCLUDE_CEMENTED_VAL}" == "true" && $(is_version_equal_or_greater 19 0) != "true" ]]; then
+    error "Node v19.0 and above required to see cemented count."
+    return 1
+  fi
+  $CURL -sS -g -d '{ "action": "block_count", "include_cemented": "'${INCLUDE_CEMENTED_VAL}'" }' "${NODEHOST}"
 }
 
 # Desc: Shows bootstrap status
@@ -1522,15 +1539,21 @@ active_difficulty_active() {
 # P2o: <$subtype> (node V18+ only)
 # P2Desc: Specify the block sub-type to prevent accidental
 # P2Desc: sends instead of a receive when using state blocks.
+# P3o: <$watch_work> (node V20+ only)
+# P3Desc: Boolean string. 
+# P3Desc: If set to true, block will be placed on watch for confirmation.
+# P3Desc: Default is true.
 # Returns: JSON from the node RPC.
 process_rpc() {
   local BLOCK="${1:-}"
   local SUBTYPE="${2:-}"; local SUBTYPE_PARAM=
+  local WATCH_WORK="${3:-}"; local WATCH_WORK_PARAM=
   [[ -n "${SUBTYPE}" && $(is_version_equal_or_greater 18 0) == "true" ]] && SUBTYPE_PARAM=", \"subtype\": \"${SUBTYPE}\"" && debug "Subtype Param: ${SUBTYPE_PARAM}"
+  [[ -n "${WATCH_WORK}" && $(is_version_equal_or_greater 20 0) == "true" ]] && WATCH_WORK_PARAM=", \"watch_work\": \"${WATCH_WORK}\"" && debug "Watch Work Param: ${WATCH_WORK_PARAM}"
   local RET; local RETVAL
   [[ -z "${BLOCK}" ]] && echo Must provide the BLOCK && return 1
   RET=$($CURL -sS -H "Content-Type: application/json" -g -d@- "${NODEHOST}" 2>/dev/null <<JSON
-{ "action": "process" ${SUBTYPE_PARAM} , "block": "${BLOCK}" }
+{ "action": "process" ${SUBTYPE_PARAM} , "block": "${BLOCK}" ${WATCH_WORK_PARAM} }
 JSON
 )
   RETVAL=$?
@@ -1554,8 +1577,9 @@ JSON
 broadcast_block() {
   local BLOCK="${1:-}"
   local SUBTYPE="${2:-}"
+  local WATCH_WORK="${3:-true}"
   local RET; local RETVAL
-  RET=$(process_rpc "${BLOCK}" "${SUBTYPE}")
+  RET=$(process_rpc "${BLOCK}" "${SUBTYPE}" "${WATCH_WORK}")
   RETVAL=$?
   DEBUG_BROADCAST=$RET
   if [[ 0 -eq $RETVAL ]]; then
@@ -2374,7 +2398,8 @@ send_pre-generated_blocks() {
 
   while read -r line; do
     #Not specifying 'subtype' of block here to avoid any slowdowns/checks on the node side.
-    HASH=$(broadcast_block "${line}")
+    #Make sure to not watch for confirmation if V20+ too.
+    HASH=$(broadcast_block "${line}" "" "false")
     RET=$?
     [[ $RET -ne 0 || -z "${HASH}" ]] && error "Failed to broadcast block at line number ${LINE_NO}. Aborting run." && RET=2 && break
 
