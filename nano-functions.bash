@@ -16,6 +16,8 @@ NANO_FUNCTIONS_VERSION=0.992
 #                   - Add 'watch_work' option to process_rpc (v20+)
 #                   - Add 'watch_work' option to broadcast_block (v20+)
 #                   - Set watch_work to false when doing spam sends.
+#          - Bugfix
+#                   - Fix active_difficulty_rpc and include_trend by default
 #
 
 # Version: 0.991
@@ -1505,31 +1507,30 @@ JSON
 
 # Desc: Returns the network's current active PoW difficulty
 # Desc: and the node's configured threshold difficulty
-# Desc: Note: Undocumented RPC feature beginning at V19.0RC1
-# Desc:   This RPC call name may change so is not guaranteed to work.
+# Desc: plus the trend of difficulty
 # RPC: active_difficulty
 # Returns: JSON from the node RPC.
 active_difficulty_rpc() {
   if [[ $(is_version_equal_or_greater 19 0) != "true" ]]; then
     error "This RPC call is only available for node V19+" && return 1
   fi
-  $CURL -sS -g -d '{ "action": "key_expand", "key": "'${KEY}'" }' "${NODEHOST}"
+  $CURL -sS -g -d '{ "action": "active_difficulty", "include_trend": "true" }' "${NODEHOST}"
 }
 
 # Desc: Returns the node's configured threshold difficulty
 # RPC: active_difficulty
 # Returns: Hex value for lowest difficulty threshold configured for the node.
-active_difficulty_threshold() {
+active_difficulty_minimum() {
   local RETVAL=0; local RET=
-  active_difficulty_rpc | show_errors | $GREP "threshold" | $CUT -d'"' -f4
+  active_difficulty_rpc | show_errors | $GREP "network_minimum" | $CUT -d'"' -f4
 }
 
 # Desc: Returns the network's current active PoW difficulty 
 # RPC: active_difficulty
 # Returns: Hex value for network's current detected difficulty.
-active_difficulty_active() {
+active_difficulty_current() {
   local RETVAL=0; local RET=
-  active_difficulty_rpc | show_errors | $GREP "active" | $CUT -d'"' -f4
+  active_difficulty_rpc | show_errors | $GREP "network_current" | $CUT -d'"' -f4
 }
 
 # Desc: Broadcast the given JSON block to the network
