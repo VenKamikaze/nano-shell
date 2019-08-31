@@ -20,6 +20,8 @@ NANO_FUNCTIONS_VERSION=0.992
 #          - Bugfix
 #                   - Fix active_difficulty_rpc and include_trend by default
 #                   - V20+ beta node compatibility (beta network reset)
+#                   - is_integer did not handle empty strings
+#                   - is_local_and_remote_block_count_similar remote_block_count parsing differences
 #
 
 # Version: 0.991
@@ -657,7 +659,12 @@ remote_block_count() {
 is_local_and_remote_block_counts_similar() {
   local WITHIN_AMOUNT=${1:-}
   
-  local REMOTE_COUNT=$(remote_block_count | $GREP count | $CUT -d'"' -f4)
+  local REMOTE_COUNT=$(remote_block_count)
+  if [[ "${REMOTE_COUNT}" == *count* ]]; then
+    REMOTE_COUNT=$(echo "${REMOTE_COUNT}" | $GREP count | $CUT -d'"' -f4)
+  fi
+  [[ $(is_integer "${REMOTE_COUNT}") != "true" ]] && echo "Received unexpected remote_block_count: ${REMOTE_COUNT}" && return 1
+
   local LOCAL_COUNT=$(block_count_rpc | $GREP count | $CUT -d'"' -f4)
 
   [[ -z "${WITHIN_AMOUNT}" ]] && WITHIN_AMOUNT=$(echo "scale=0; $REMOTE_COUNT / 10000" | $BC)
@@ -1774,6 +1781,7 @@ mnano_to_raw() {
 # Returns: or 0 if success (is integer)
 is_integer() {
   local INPUT="${1:-}"
+  [[ -z "${INPUT}" ]] && echo "false" && return 1
   [[ -n ${INPUT//[0-9]/} ]] && echo "false" && return 1
   echo "true" && return 0
 }
@@ -3220,4 +3228,4 @@ else
   [[ "${NANO_NODE_VERSION}" == "${NANO_NODE_VERSION_UNKNOWN}" ]] && error "WARNING: Unable to determine node version. Assuming latest version and all functions are supported. This may impact the functionality of some RPC commands."
 fi
 
-NANO_FUNCTIONS_HASH=0972e0fef4b983d76416c7f00aeee218
+NANO_FUNCTIONS_HASH=0460148ad40cfaf9cbfddc135c737975
