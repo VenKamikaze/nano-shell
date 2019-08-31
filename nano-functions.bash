@@ -15,9 +15,11 @@ NANO_FUNCTIONS_VERSION=0.992
 #                   - Add 'include_cemented' option to block_count_rpc (v19+)
 #                   - Add 'watch_work' option to process_rpc (v20+)
 #                   - Add 'watch_work' option to broadcast_block (v20+)
+#                   - V20+ beta node compatibility (beta network reset)
 #                   - Set watch_work to false when doing spam sends.
 #          - Bugfix
 #                   - Fix active_difficulty_rpc and include_trend by default
+#                   - V20+ beta node compatibility (beta network reset)
 #
 
 # Version: 0.991
@@ -212,7 +214,7 @@ NANO_NODE_VERSION=
 NANO_NODE_VERSION_UNKNOWN=99.99
 
 PROD_BURN_TX_HASH=ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113
-BETA_FAUCET_TX_HASH=23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23
+BETA_FAUCET_TX_HASH=8334B856FB62E1A736DC90D4E0992F7F9C28754DFFE57774812EFF95CE99B617
 
 DIFFICULTY_WEAK=fffffc0000000000 # 1x on Beta Network, under minimum/does not work on LIVE
 DIFFICULTY_NORMAL=ffffffc000000000 # 1x
@@ -321,10 +323,10 @@ is_node_up() {
 # RPC: block:hash
 # Returns: Text (PROD,BETA,OTHER)
 determine_network() {
-  local BLOCK_HASH=$(block_info_previous_hash "ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113" 2>/dev/null)
+  local BLOCK_HASH=$(block_info_previous_hash "${PROD_BURN_TX_HASH}" 2>/dev/null)
   [[ ${#BLOCK_HASH} -eq 64 ]] && echo "PROD" && return 0
 
-  BLOCK_HASH=$(block_info_previous_hash "23D26113B4E843D3A4CE318EF7D0F1B25D665D2FF164AE15B27804EA76826B23" 2>/dev/null)
+  BLOCK_HASH=$(block_info_previous_hash "${BETA_FAUCET_TX_HASH}" 2>/dev/null)
   [[ ${#BLOCK_HASH} -eq 64 ]] && echo "BETA" && return 1
 
   echo "OTHER" && return 2
